@@ -1,8 +1,8 @@
 import sys
 import os
 import os.path as path
-import cProfile
 import itertools
+import time
 
 import Bio.PDB as PDB
 import scipy.spatial as spatial
@@ -11,13 +11,6 @@ import numpy as numpy
 
 class AtomPoint():
     pass
-
-
-# class TestClass():
-# field = 42
-#
-#     def __repr__(self):
-#         return str([self.field ** .5] * 100)
 
 
 # noinspection PyTypeChecker
@@ -40,7 +33,6 @@ def square_distance(point1, point2):
 
 
 def make_boxes(points, box_side):
-    # boxes = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
     boxes = dict()
     for point in points:
         box_index = tuple(map(lambda coord: int(coord / box_side), point.coord))
@@ -62,17 +54,19 @@ def collect_points(box_index, boxes):
         next_index = shift_index(shift, box_index)
         if next_index in boxes:
             for point in boxes[next_index]:
-                points.append(point)
+                if not hasattr(point, 'deleted'):
+                    points.append(point)
 
     return points
 
 
-def remove_inner_points(protein_residues, solvent_radius):
+def remove_inner_points(protein_residues, solvent_radius, max_atom_radius):
+    box_side = max_atom_radius + solvent_radius
     atom_points = [atom_point for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')
                    for atom_point in atom.sas_points]
-    point_boxes = make_boxes(atom_points, 2)
+    point_boxes = make_boxes(atom_points, box_side)
     atoms = [atom for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')]
-    atom_boxes = make_boxes(atoms, 2)
+    atom_boxes = make_boxes(atoms, box_side)
 
     for box_index in atom_boxes:
         box_neighbour_points = collect_points(box_index, point_boxes)
@@ -80,8 +74,12 @@ def remove_inner_points(protein_residues, solvent_radius):
             for point in box_neighbour_points:
                 if hasattr(point, 'deleted'):
                     continue
-                if square_distance(atom.coord, point.coord) < (atom.radius + solvent_radius) ** 2:
+                if square_distance(atom.coord, point.coord) < (atom.radius + solvent_radius) ** 2 and point.parent != atom:
                     point.deleted = True
+
+                    if point.id == 1 and point.parent.id == 'O' and point.parent.parent.id[1] == 497:
+                        print(atom)
+                        print(atom.parent)
 
     # now replace sas_points with sifted
     for atom in atoms:
@@ -94,74 +92,18 @@ def remove_inner_points(protein_residues, solvent_radius):
     return protein_residues
 
 
-# def remove_inner_points(protein_residues, solvent_radius):
-#     max_atom_radius = 1.9
-#     atom_points = [atom_point for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')
-#                    for atom_point in atom.sas_points]
-#     point_coords = [point.coord for point in atom_points]
-#     atoms = [atom for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')]
-#     atom_coords = [atom.coord for atom in atoms]
-#     # create kdtree for surface points
-#     points_kdtree = spatial.KDTree(point_coords)
-#     atoms_kdtree = spatial.KDTree(atom_coords)
-#     near_points = atoms_kdtree.query_ball_tree(points_kdtree, max_atom_radius + solvent_radius)
-#
-#     for i in range(len(atom_coords)):
-#         for neighbour_index in near_points[i]:
-#             point = atom_points[neighbour_index]
-#             atom = atoms[i]
-#             if square_distance(point.coord, atom.coord) < (atom.radius + solvent_radius) ** 2:
-#                 point.deleted = True
-#
-#     # now replace sas_points with sifted
-#     for atom in atoms:
-#         sas_points = []
-#         for point in atom.sas_points:
-#             if not hasattr(point, 'deleted'):
-#                 sas_points.append(point)
-#         atom.sas_points = sas_points
-#
-#     return protein_residues
-
-
-# def remove_inner_points(protein_residues, solvent_radius):
-#     atom_points = [atom_point for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')
-#                    for atom_point in atom.sas_points]
-#     point_coords = [point.coord for point in atom_points]
-#     atoms = [atom for residue in protein_residues for atom in residue if hasattr(atom, 'sas_points')]
-#     # create kdtree for surface points
-#     sphere_kdtree = spatial.KDTree(point_coords)
-#
-#     for atom in atoms:
-#         query_radius = atom.radius + solvent_radius
-#         nearest_points_indices = sphere_kdtree.query_ball_point(atom.coord, query_radius)
-#
-#         for point_index in nearest_points_indices:
-#             # point already deleted, there is no need to any calculations
-#             point = atom_points[point_index]
-#             # point lie within atom sphere
-#             if point.parent != atom:
-#                 point.deleted = True
-#     # now replace sas_points with sifted
-#     for atom in atoms:
-#         sas_points = []
-#         for point in atom.sas_points:
-#             if not hasattr(point, 'deleted'):
-#                 sas_points.append(point)
-#         atom.sas_points = sas_points
-#
-#     return protein_residues
-
-
 def add_atom_surface(atom, sphere_points_amount, solvent_radius):
     sphere_radius = atom.radius + solvent_radius
     sphere_points = generate_sphere_points(sphere_points_amount) * sphere_radius + atom.get_coord()
     atom_points = []
 
+    point_id = 0
     for point in sphere_points:
         next_atom_point = AtomPoint()
         next_atom_point.coord = list(point)
         next_atom_point.parent = atom
+        next_atom_point.id = point_id
+        point_id += 1
         atom_points.append(next_atom_point)
 
     atom.sas_points = atom_points
@@ -243,7 +185,8 @@ def build_unmodified_sas(structure, modres_names, sphere_points_amount, solvent_
                 else:
                     print('file: ' + structure.id + ', chain: ' + residue.parent.id +
                           ', residue: ' + str(residue.id) + ', atom: ' + atom.id + ' is not in standard atoms')
-    return remove_inner_points(protein_residues, solvent_radius)
+    max_atom_radius = max(standard_atom_radius.values())
+    return remove_inner_points(protein_residues, solvent_radius, max_atom_radius)
 
 
 def get_modified_unmodified_correspondence(pdb_file):
@@ -290,8 +233,20 @@ def residue_depth(residue, surface_kdtree):
     furthest_atom = residue[furthest_atom_name]
     nearest_surface_point_info = surface_kdtree.query(furthest_atom.coord)
 
-    # return distance to nearest surface point
-    return nearest_surface_point_info[0]
+    return nearest_surface_point_info
+
+
+def get_neighbours_features(residue, neighbours_amount, atom_kdtree):
+    features = []
+    query_size = neighbours_amount * 10
+    furthest_atom_name = furthest_atoms[residue.canonical_name]
+    # can't collect data for not full residue
+    if furthest_atom_name not in residue:
+        return [''] * len(neighbours_general_headers) * neighbours_amount
+    furthest_atom = residue[furthest_atom_name]
+    neighbour_atoms_info = atom_kdtree.query(furthest_atom.coord, query_size)
+
+    return features
 
 
 def collect_features(residue, neighbours_amount, sas):
@@ -301,12 +256,15 @@ def collect_features(residue, neighbours_amount, sas):
     atom_points = [atom_point for residue in sas for atom in residue if hasattr(atom, 'sas_points')
                    for atom_point in atom.sas_points]
     point_coords = [point.coord for point in atom_points]
-    # atoms = [atom for atom in residue if hasattr(atom, 'sas_points')]
+    atoms = [atom for residue in sas for atom in residue if hasattr(atom, 'sas_points')]
+    atom_coords = [atom.coord for atom in atoms]
 
     surface_kdtree = spatial.KDTree(point_coords)
+    atom_kdtree = spatial.KDTree(atom_coords)
 
-    features = [filename, res_status, residue.canonical_name, residue.id[1], residue_exposure(residue),
-                residue_depth(residue, surface_kdtree)]
+    res_depth = residue_depth(residue, surface_kdtree)
+    features = [filename, res_status, residue.canonical_name, residue.id[1], residue_exposure(residue), res_depth[0]] + \
+               get_neighbours_features(residue, neighbours_amount, atom_kdtree)
     str_features = [str(feature) for feature in features]
 
     return str_features
@@ -327,9 +285,8 @@ def add_atom_radii(atoms, atom_radii):
 
 
 # only modifications with hetnam equal to parent directory name will be extracted
-def process_directory(data_path):
+def process_directory(data_path, neighbours_amount):
     print_step = 1
-    neighbours_amount = 4
     sphere_points_amount = 20
     # https://ru.wikipedia.org/wiki/%D0%92%D0%BE%D0%B4%D0%B0#/media/File:Water_molecule_dimensions.svg
     oh_bond_length = 0.96
@@ -347,7 +304,7 @@ def process_directory(data_path):
     for filename in filenames:
         next_file_path = path.join(data_path, filename)
         if path.isdir(next_file_path):
-            yield from process_directory(next_file_path)
+            yield from process_directory(next_file_path, neighbours_amount)
         elif next_file_path.endswith('.pdb'):
             with open(next_file_path) as next_file:
                 mod_to_unmod_dict = get_modified_unmodified_correspondence(next_file)
@@ -357,8 +314,6 @@ def process_directory(data_path):
                 next_file.seek(0)
                 structure = pdb_parser.get_structure(filename, next_file)
             add_unmodified_residue_names(structure.get_residues(), mod_to_unmod_dict)
-            # https://en.wikipedia.org/wiki/Van_der_Waals_radius
-            standard_atom_radius = {'C': 1.7, 'O': 1.52, 'N': 1.55, 'S': 1.8, 'SE': 1.9}
             add_atom_radii(structure.get_atoms(), standard_atom_radius)
             sas = build_unmodified_sas(structure, mod_to_unmod_dict, sphere_points_amount, solvent_radius)
 
@@ -376,9 +331,17 @@ def process_directory(data_path):
 
 def main():
     data_path = sys.argv[1]
+    neighbours_amount = 4
+
+    neighbours_headers = []
+    for i in range(neighbours_amount):
+        for header in neighbours_general_headers:
+            neighbours_headers.append(header + str(i))
+
     with open(path.join(data_path, 'output1.csv'), 'w') as output:
-        output.write(','.join(['filename', 'status', 'type', 'pos', 'solvent_exposure', 'residue_depth']) + '\n')
-        for entry in process_directory(data_path):
+        output.write(','.join(['filename', 'status', 'type', 'pos', 'solvent_exposure', 'residue_depth'] + neighbours_headers)
+                     + '\n')
+        for entry in process_directory(data_path, neighbours_amount):
             output.write(','.join(entry) + '\n')
 
 
@@ -403,16 +366,14 @@ furthest_atoms = {'GLY': 'CA',
                   'LYS': 'NZ',
                   'ARG': ('NH1', 'NH2'),
                   'HIS': 'NE2'}
+# https://en.wikipedia.org/wiki/Van_der_Waals_radius
+standard_atom_radius = {'C': 1.7, 'O': 1.52, 'N': 1.55, 'S': 1.8, 'SE': 1.9}
+neighbours_general_headers = ['distance', 'theta', 'phi', 'type']
+
+
 # check SNP: 3NBJ - 634 A
 # check multiple models
-# def test():
-#     arr = []
-#     for i in range(300000):
-#         arr.append(TestClass())
-#     print('x')
 # test()
-# main()
-# a = collections.defaultdict(lambda: collections.defaultdict(lambda: collections.defaultdict(list)))
-# b = dict()
-# b[(1,2,3)] = 2
-cProfile.run('main()')
+start = time.clock()
+main()
+print('{0} time elapsed'.format(time.clock() - start))
