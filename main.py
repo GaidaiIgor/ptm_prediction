@@ -3,6 +3,7 @@ import os
 import os.path as path
 import itertools
 import time
+import math
 
 import Bio.PDB as PDB
 import scipy.spatial as spatial
@@ -110,36 +111,11 @@ def add_atom_surface(atom, sphere_points_amount, solvent_radius):
     atom.max_sphere_points = sphere_points_amount
 
 
-def build_unmodified_sas(structure, modres_names, sphere_points_amount, solvent_radius):
+def build_unmodified_sas(structure, sphere_points_amount, solvent_radius):
     # returns array of protein residues with added to standard residue atoms 'sas_points' field
     # which contains surface points of protein (only external points, inner points are removed)
 
-    # variable names for the same atom (or atom replacement) listed in ()
-    standard_residue_atoms = {'GLY': [],
-                              'ALA': ['CB'],
-                              'VAL': ['CB', 'CG1', 'CG2'],
-                              'LEU': ['CB', 'CG', 'CD1', 'CD2'],
-                              'ILE': ['CB', 'CG1', 'CG2', 'CD1'],
-                              'MET': ['CB', 'CG', ('SD', 'S', 'SE'), 'CE'],
-                              'PHE': ['CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'],
-                              'TRP': ['CB', 'CG', 'CD1', 'CD2', 'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'],
-                              'PRO': ['CB', 'CG', 'CD'],
-                              'SER': ['CB', 'OG'],
-                              'THR': ['CB', 'OG1', 'CG2'],
-                              'CYS': ['CB', 'SG'],
-                              'TYR': ['CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ', 'OH'],
-                              'ASN': ['CB', 'CG', 'OD1', 'ND2'],
-                              'GLN': ['CB', 'CG', 'CD', 'OE1', 'NE2'],
-                              'ASP': ['CB', 'CG', 'OD1', 'OD2'],
-                              'GLU': ['CB', 'CG', 'CD', 'OE1', 'OE2'],
-                              'LYS': ['CB', 'CG', 'CD', 'CE', 'NZ'],
-                              'ARG': ['CB', 'CG', 'CD', 'NE', 'CZ', 'NH1', 'NH2'],
-                              'HIS': ['CB', 'CG', 'ND1', 'CD2', 'CE1', 'NE2']}
-
-    for key, value in standard_residue_atoms.items():
-        value.extend(standard_backbone_atoms)
     protein_residues = []
-
     for residue in structure.get_residues():
         # we don't need water
         if residue.id[0] == 'W':
@@ -149,10 +125,10 @@ def build_unmodified_sas(structure, modres_names, sphere_points_amount, solvent_
         # because we want to predict modification that didn't happen yet
         elif residue.id[0].startswith('H_'):
             # skip non amino acid het atoms
-            if residue.resname not in modres_names:
+            if residue.resname not in structure.mod_code_to_unmod_code:
                 continue
             protein_residues.append(residue)
-            for possible_atom_names in standard_residue_atoms[modres_names[residue.resname]]:
+            for possible_atom_names in standard_residue_atoms[structure.mod_code_to_unmod_code[residue.resname]]:
                 # create 1-element tuple to avoid iterating over string letters
                 if not isinstance(possible_atom_names, tuple):
                     possible_atom_names = (possible_atom_names, )
@@ -189,29 +165,6 @@ def build_unmodified_sas(structure, modres_names, sphere_points_amount, solvent_
     return remove_inner_points(protein_residues, solvent_radius, max_atom_radius)
 
 
-def get_modified_unmodified_correspondence(pdb_file):
-    modres_names = {}
-    for line in pdb_file:
-        if line[:6].strip() == 'MODRES':
-            modres_name = line[12:15].strip()
-            std_residue_name = line[24:27].strip()
-            modres_names[modres_name] = std_residue_name
-    return modres_names
-
-
-def get_modified_residue_code(pdb_file, modification_full_name):
-    pdb_file.seek(0)
-    for line in pdb_file:
-        if line[:6].strip() == 'HETNAM':
-            next_modres_full_name = line[15:].strip()
-            if next_modres_full_name == modification_full_name:
-                modres_code = line[11:14].strip()
-                return modres_code
-    # shouldn't happen
-    print('get_modified_residue_code: {0} {1} doesnt exist'.format(pdb_file.name, modification_full_name))
-    return None
-
-
 # calculates residue exposure relative to residue size
 def residue_exposure(residue):
     total_points = 0
@@ -225,26 +178,72 @@ def residue_exposure(residue):
     return total_points / possible_points
 
 
-def residue_depth(residue, surface_kdtree):
-    furthest_atom_name = furthest_atoms[residue.canonical_name]
+# returns one of existing atoms or None if no one exists
+def get_any_atom(atom_names, residue):
+    if not isinstance(atom_names, tuple):
+        atom_names = (atom_names, )
+
     # can't collect data for not full residue
-    if furthest_atom_name not in residue:
-        return ''
-    furthest_atom = residue[furthest_atom_name]
+    for atom_name in atom_names:
+        if atom_name in residue:
+            return residue[atom_name]
+    return None
+
+
+def residue_depth(residue, surface_kdtree):
+    furthest_atom_names = furthest_atoms[residue.canonical_name]
+    furthest_atom = get_any_atom(furthest_atom_names, residue)
+
+    if furthest_atom is None:
+        return ['', '']
     nearest_surface_point_info = surface_kdtree.query(furthest_atom.coord)
 
     return nearest_surface_point_info
 
 
-def get_neighbours_features(residue, neighbours_amount, atom_kdtree):
+# returns distance theta and phi (spherical coordinates with center in base_atom) for atom
+def positional_features(base_atom, atom):
+    relative_atom_coord = atom.coord - base_atom.coord
+    distance = sum(map(lambda x: x ** 2, relative_atom_coord)) ** .5
+    theta = math.acos(relative_atom_coord[2] / distance)
+    phi = math.atan(relative_atom_coord[1] / relative_atom_coord[0])
+    return [distance, theta, phi]
+
+
+# returns type, exposure and depth of residue
+def amino_acid_features(residue, surface_kdtree):
+    res_depth = residue_depth(residue, surface_kdtree)
+    return [residue.canonical_name, residue_exposure(residue), res_depth[0]]
+
+
+def neighbours_features(residue, neighbours_amount, atoms, atom_kdtree, surface_kdtree):
     features = []
-    query_size = neighbours_amount * 10
-    furthest_atom_name = furthest_atoms[residue.canonical_name]
-    # can't collect data for not full residue
-    if furthest_atom_name not in residue:
-        return [''] * len(neighbours_general_headers) * neighbours_amount
-    furthest_atom = residue[furthest_atom_name]
+    query_size = neighbours_amount * max_residue_size
+    furthest_atom_names = furthest_atoms[residue.canonical_name]
+    furthest_atom = get_any_atom(furthest_atom_names, residue)
+
+    if furthest_atom is None:
+        return [''] * (len(positional_general_headers) + len(amino_acid_general_headers)) * neighbours_amount
+
+    used_residues = {residue.id[1]}
     neighbour_atoms_info = atom_kdtree.query(furthest_atom.coord, query_size)
+    for neighbour_number in neighbour_atoms_info[1]:
+        atom = atoms[neighbour_number]
+        parent_residue = atom.parent
+
+        # skip atoms which belong to already described residues
+        if parent_residue.id[1] in used_residues:
+            continue
+        used_residues.add(parent_residue.id[1])
+        features += positional_features(furthest_atom, atom)
+        features += amino_acid_features(parent_residue, surface_kdtree)
+
+        if len(used_residues) - 1 >= neighbours_amount:
+            break
+
+    # shouldn't happen
+    if len(used_residues) - 1 < neighbours_amount:
+        print('Found less residues than required')
 
     return features
 
@@ -262,26 +261,83 @@ def collect_features(residue, neighbours_amount, sas):
     surface_kdtree = spatial.KDTree(point_coords)
     atom_kdtree = spatial.KDTree(atom_coords)
 
-    res_depth = residue_depth(residue, surface_kdtree)
-    features = [filename, res_status, residue.canonical_name, residue.id[1], residue_exposure(residue), res_depth[0]] + \
-               get_neighbours_features(residue, neighbours_amount, atom_kdtree)
+    features = [filename, residue.id[1], res_status] + amino_acid_features(residue, surface_kdtree) + \
+               neighbours_features(residue, neighbours_amount, atoms, atom_kdtree, surface_kdtree)
     str_features = [str(feature) for feature in features]
 
     return str_features
 
 
-def add_unmodified_residue_names(residues, mod_to_unmod_dict):
-    for residue in residues:
-        if residue.resname in mod_to_unmod_dict:
-            residue.canonical_name = mod_to_unmod_dict[residue.resname]
+def add_unmodified_residue_names(structure):
+    for residue in structure.get_residues():
+        if residue.resname in structure.mod_code_to_unmod_code:
+            residue.canonical_name = structure.mod_code_to_unmod_code[residue.resname]
         else:
             residue.canonical_name = residue.resname
 
 
-def add_atom_radii(atoms, atom_radii):
-    for atom in atoms:
-        if atom.element in atom_radii:
-            atom.radius = atom_radii[atom.element]
+def add_atom_radii(structure):
+    for atom in structure.get_atoms():
+        if atom.element in standard_atom_radius:
+            atom.radius = standard_atom_radius[atom.element]
+
+
+def add_residue_secondary_structure(structure, helix_intervals, beta_sheet_intervals):
+    no_secondary_structure_class = 14
+    helix_iter = iter(helix_intervals)
+    beta_sheet_iter = iter(beta_sheet_intervals)
+
+    next_helix = next(helix_iter) if helix_intervals else None
+    next_beta_sheet = next(beta_sheet_iter) if beta_sheet_intervals else None
+
+    for residue in structure.get_residues():
+
+        if next_helix is None or residue.id[1] < next_helix[0]:
+            helix = False
+        if next_beta_sheet is None or residue.id[1] < next_beta_sheet[0]:
+            beta_sheet = False
+        if not helix and not beta_sheet:
+
+        if residue.id[1] < next_helix[0] and residue.id[1] < next_beta_sheet[0]:
+            residue.secondary_structure_class = no_secondary_structure_class
+        else:
+
+
+def add_structure_info(structure, pdb_file):
+    pdb_file.seek(0)
+    mod_code_to_unmod_code = {}
+    mod_name_to_mod_code = {}
+    helix_intervals = []
+    beta_sheet_intervals = []
+    beta_sheet_class_shift = 12
+
+    for line in pdb_file:
+        header = line[:6].strip()
+        if header == 'MODRES':
+            modified_name = line[12:15].strip()
+            unmodified_name = line[24:27].strip()
+            mod_code_to_unmod_code[modified_name] = unmodified_name
+        elif header == 'HETNAM':
+            modres_code = line[11:14].strip()
+            modres_full_name = line[15:].strip()
+            mod_name_to_mod_code[modres_full_name] = modres_code
+        elif header == 'HELIX':
+            interval_start = int(line[21:25].strip())
+            interval_end = int(line[33:37].strip())
+            helix_class = int(line[38:40].strip())
+            helix_intervals.append((interval_start, interval_end, helix_class))
+        elif header == 'SHEET':
+            interval_start = int(line[22:26].strip())
+            interval_end = int(line[33:37].strip())
+            beta_sheet_class = int(line[38:40].strip()) + beta_sheet_class_shift
+            beta_sheet_intervals.append((interval_start, interval_end, beta_sheet_class))
+
+    structure.mod_code_to_unmod_code = mod_code_to_unmod_code
+    structure.mod_name_to_mod_code = mod_name_to_mod_code
+
+    add_unmodified_residue_names(structure)
+    add_residue_secondary_structure(structure, helix_intervals, beta_sheet_intervals)
+    add_atom_radii(structure)
 
 
 # only modifications with hetnam equal to parent directory name will be extracted
@@ -307,18 +363,16 @@ def process_directory(data_path, neighbours_amount):
             yield from process_directory(next_file_path, neighbours_amount)
         elif next_file_path.endswith('.pdb'):
             with open(next_file_path) as next_file:
-                mod_to_unmod_dict = get_modified_unmodified_correspondence(next_file)
-                modification_full_name = path.split(data_path)[1]
-                modres_code = get_modified_residue_code(next_file, modification_full_name)
-                unmod_res_code = mod_to_unmod_dict[modres_code]
-                next_file.seek(0)
                 structure = pdb_parser.get_structure(filename, next_file)
-            add_unmodified_residue_names(structure.get_residues(), mod_to_unmod_dict)
-            add_atom_radii(structure.get_atoms(), standard_atom_radius)
-            sas = build_unmodified_sas(structure, mod_to_unmod_dict, sphere_points_amount, solvent_radius)
+                add_structure_info(structure, next_file)
+
+            modification_full_name = path.split(data_path)[1]
+            modified_residue_code = structure.mod_name_to_mod_code[modification_full_name]
+            unmodified_residue_code = structure.mod_code_to_unmod_code[modified_residue_code]
+            sas = build_unmodified_sas(structure, sphere_points_amount, solvent_radius)
 
             for residue in sas:
-                if residue.canonical_name == unmod_res_code:
+                if residue.canonical_name == unmodified_residue_code:
                     features = collect_features(residue, neighbours_amount, sas)
                     yield features
             files_proceeded += 1
@@ -335,17 +389,44 @@ def main():
 
     neighbours_headers = []
     for i in range(neighbours_amount):
-        for header in neighbours_general_headers:
+        for header in positional_general_headers + amino_acid_general_headers:
             neighbours_headers.append(header + str(i))
 
-    with open(path.join(data_path, 'output1.csv'), 'w') as output:
-        output.write(','.join(['filename', 'status', 'type', 'pos', 'solvent_exposure', 'residue_depth'] + neighbours_headers)
+    with open(path.join(data_path, 'output.csv'), 'w') as output:
+        output.write(','.join(['filename', 'pos', 'status'] + amino_acid_general_headers + neighbours_headers)
                      + '\n')
         for entry in process_directory(data_path, neighbours_amount):
             output.write(','.join(entry) + '\n')
 
 
 standard_backbone_atoms = ['N', 'CA', 'C', ('O', 'S')]
+
+# variable names for the same atom (or atom replacement) listed in ()
+standard_residue_atoms = {'GLY': [],
+                          'ALA': ['CB'],
+                          'VAL': ['CB', 'CG1', 'CG2'],
+                          'LEU': ['CB', 'CG', 'CD1', 'CD2'],
+                          'ILE': ['CB', 'CG1', 'CG2', 'CD1'],
+                          'MET': ['CB', 'CG', ('SD', 'S', 'SE'), 'CE'],
+                          'PHE': ['CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ'],
+                          'TRP': ['CB', 'CG', 'CD1', 'CD2', 'NE1', 'CE2', 'CE3', 'CZ2', 'CZ3', 'CH2'],
+                          'PRO': ['CB', 'CG', 'CD'],
+                          'SER': ['CB', 'OG'],
+                          'THR': ['CB', 'OG1', 'CG2'],
+                          'CYS': ['CB', 'SG'],
+                          'TYR': ['CB', 'CG', 'CD1', 'CD2', 'CE1', 'CE2', 'CZ', 'OH'],
+                          'ASN': ['CB', 'CG', 'OD1', 'ND2'],
+                          'GLN': ['CB', 'CG', 'CD', 'OE1', 'NE2'],
+                          'ASP': ['CB', 'CG', 'OD1', 'OD2'],
+                          'GLU': ['CB', 'CG', 'CD', 'OE1', 'OE2'],
+                          'LYS': ['CB', 'CG', 'CD', 'CE', 'NZ'],
+                          'ARG': ['CB', 'CG', 'CD', 'NE', 'CZ', 'NH1', 'NH2'],
+                          'HIS': ['CB', 'CG', 'ND1', 'CD2', 'CE1', 'NE2']}
+
+for key, value in standard_residue_atoms.items():
+    value.extend(standard_backbone_atoms)
+max_residue_size = max(map(len, standard_residue_atoms.values()))
+
 furthest_atoms = {'GLY': 'CA',
                   'ALA': 'CB',
                   'VAL': ('CG1', 'CG2'),
@@ -368,7 +449,9 @@ furthest_atoms = {'GLY': 'CA',
                   'HIS': 'NE2'}
 # https://en.wikipedia.org/wiki/Van_der_Waals_radius
 standard_atom_radius = {'C': 1.7, 'O': 1.52, 'N': 1.55, 'S': 1.8, 'SE': 1.9}
-neighbours_general_headers = ['distance', 'theta', 'phi', 'type']
+
+positional_general_headers = ['distance', 'theta', 'phi']
+amino_acid_general_headers = ['type', 'solvent_exposure', 'residue_depth', 'secondary_structure']
 
 
 # check SNP: 3NBJ - 634 A
