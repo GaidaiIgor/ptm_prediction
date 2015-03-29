@@ -14,6 +14,13 @@ class AtomPoint():
     pass
 
 
+class SecondaryStructureInfo():
+    def __init__(self, chain_id, interval_start, interval_end, secondary_structure_class):
+        self.chain_id = chain_id
+        self.interval_start = interval_start
+        self.interval_end = interval_end
+        self.secondary_structure_class = secondary_structure_class
+
 # noinspection PyTypeChecker
 # http://blog.marmakoide.org/?p=1
 def generate_sphere_points(n):
@@ -213,7 +220,7 @@ def positional_features(base_atom, atom):
 # returns type, exposure and depth of residue
 def amino_acid_features(residue, surface_kdtree):
     res_depth = residue_depth(residue, surface_kdtree)
-    return [residue.canonical_name, residue_exposure(residue), res_depth[0]]
+    return [residue.canonical_name, residue_exposure(residue), res_depth[0], residue.secondary_structure_class]
 
 
 def neighbours_features(residue, neighbours_amount, atoms, atom_kdtree, surface_kdtree):
@@ -282,33 +289,26 @@ def add_atom_radii(structure):
             atom.radius = standard_atom_radius[atom.element]
 
 
-def add_residue_secondary_structure(structure, helix_intervals, beta_sheet_intervals):
+def add_residue_secondary_structure(structure, secondary_structure_info):
     no_secondary_structure_class = 14
-    helix_iter = iter(helix_intervals)
-    beta_sheet_iter = iter(beta_sheet_intervals)
 
-    next_helix = next(helix_iter) if helix_intervals else None
-    next_beta_sheet = next(beta_sheet_iter) if beta_sheet_intervals else None
-
+    residues = {}
+    # first, let's assign no structure to all
     for residue in structure.get_residues():
+        residue.secondary_structure_class = no_secondary_structure_class
+        residues[residue.parent.id + str(residue.id[1])] = residue
 
-        if next_helix is None or residue.id[1] < next_helix[0]:
-            helix = False
-        if next_beta_sheet is None or residue.id[1] < next_beta_sheet[0]:
-            beta_sheet = False
-        if not helix and not beta_sheet:
-
-        if residue.id[1] < next_helix[0] and residue.id[1] < next_beta_sheet[0]:
-            residue.secondary_structure_class = no_secondary_structure_class
-        else:
+    # now let's change it for specified intervals
+    for info in secondary_structure_info:
+        for i in range(info.interval_start, info.interval_end + 1):
+            residues[info.chain_id + str(i)].secondary_structure_class = info.secondary_structure_class
 
 
 def add_structure_info(structure, pdb_file):
     pdb_file.seek(0)
     mod_code_to_unmod_code = {}
     mod_name_to_mod_code = {}
-    helix_intervals = []
-    beta_sheet_intervals = []
+    secondary_structure_info = []
     beta_sheet_class_shift = 12
 
     for line in pdb_file:
@@ -322,21 +322,23 @@ def add_structure_info(structure, pdb_file):
             modres_full_name = line[15:].strip()
             mod_name_to_mod_code[modres_full_name] = modres_code
         elif header == 'HELIX':
+            chain_id = line[19]
             interval_start = int(line[21:25].strip())
             interval_end = int(line[33:37].strip())
             helix_class = int(line[38:40].strip())
-            helix_intervals.append((interval_start, interval_end, helix_class))
+            secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, interval_end, helix_class))
         elif header == 'SHEET':
+            chain_id = line[21]
             interval_start = int(line[22:26].strip())
             interval_end = int(line[33:37].strip())
             beta_sheet_class = int(line[38:40].strip()) + beta_sheet_class_shift
-            beta_sheet_intervals.append((interval_start, interval_end, beta_sheet_class))
+            secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, interval_end, beta_sheet_class))
 
     structure.mod_code_to_unmod_code = mod_code_to_unmod_code
     structure.mod_name_to_mod_code = mod_name_to_mod_code
 
     add_unmodified_residue_names(structure)
-    add_residue_secondary_structure(structure, helix_intervals, beta_sheet_intervals)
+    add_residue_secondary_structure(structure, secondary_structure_info)
     add_atom_radii(structure)
 
 
