@@ -1,5 +1,6 @@
 from enum import Enum
 import itertools
+import math
 
 from Bio import PDB
 import numpy
@@ -246,9 +247,9 @@ class ProteinStructure():
             box_neighbour_points = list(ProteinStructure.__collect_points(box_index, point_boxes))
             for atom in atom_boxes[box_index]:
                 for point in box_neighbour_points:
-                    if point.deleted:
+                    if point.deleted or point.parent == atom:
                         continue
-                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius) and point.parent != atom:
+                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius + solvent_radius):
                         point.deleted = True
 
         # now replace sas_points with sifted
@@ -258,6 +259,8 @@ class ProteinStructure():
                 if not point.deleted:
                     sas_points.append(point)
             atom.sas_points = sas_points
+        # invalidate atom points
+        self.atom_points = []
 
     @staticmethod
     def __residue_to_key(residue):
@@ -267,12 +270,19 @@ class ProteinStructure():
     def __shift_index(shift, index):
         return tuple([shift + index for (shift, index) in zip(shift, index)])
 
+    # it's faster than check if square distance less than square radius
     @staticmethod
     def __is_inside_sphere(test_point, sphere_center, sphere_radius):
-        circle_radius = sphere_radius ** 2 - (test_point[2] - sphere_center[2]) ** 2
-        return circle_radius
-        # return (point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2 + (point1[2] - point2[2]) ** 2 # sum([(coord1 -
-        # coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
+        dz = test_point[2] - sphere_center[2]
+        if -sphere_radius <= dz <= sphere_radius:
+            circle_radius = sphere_radius if dz == 0 else dz * math.tan(math.acos(dz / sphere_radius))
+            dy = test_point[1] - sphere_center[1]
+            if -circle_radius <= dy <= circle_radius:
+                x_width = circle_radius if dy == 0 else dy * math.tan(math.acos(dy / circle_radius))
+                dx = test_point[0] - sphere_center[0]
+                if -x_width <= dx <= x_width:
+                    return True
+        return False
 
     beta_sheet_class_shift = 12
     no_secondary_structure_class = 14
@@ -320,6 +330,12 @@ class AtomPoint():
 class ResidueStatus(Enum):
     modified = 0
     unmodified = 1
+
+    def __str__(self):
+        if self.value == 0:
+            return 'modified'
+        if self.value == 1:
+            return 'unmodified'
 
 
 class SecondaryStructureInfo():

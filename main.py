@@ -3,7 +3,6 @@ import os
 import os.path as path
 import time
 import math
-import cProfile
 
 import scipy.spatial as spatial
 
@@ -103,6 +102,20 @@ def collect_features(residue, neighbours_amount, structure):
     return str_features
 
 
+def square_distance(point1, point2):
+    return sum([(coord1 - coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
+
+
+def test_residue_sas_points(residue, structure, solvent_radius):
+    for atom in residue.atoms:
+        for point in atom.sas_points:
+            for other_atom in structure.get_atoms():
+                if other_atom != atom:
+                    if square_distance(point.coord, other_atom.coord) < (other_atom.radius + solvent_radius) ** 2:
+                        return False
+    return True
+
+
 # only modifications with hetnam equal to parent directory name will be extracted
 def process_directory(data_path, neighbours_amount):
     print_step = 1
@@ -161,5 +174,6 @@ amino_acid_general_headers = ['type', 'solvent_exposure', 'residue_depth', 'seco
 # check SNP: 3NBJ - 634 A
 # check multiple models
 start = time.clock()
-cProfile.run('main()', 'profile_info3')
+main()
+# cProfile.run('main()', '5')
 print('{0} time elapsed'.format(time.clock() - start))
