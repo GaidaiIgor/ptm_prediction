@@ -35,14 +35,14 @@ class ProteinStructure():
             self.atoms = [atom for residue in self.get_residues() for atom in residue.atoms]
         return self.atoms
 
-    def get_residues(self):
-        return self.protein_residues.values()
-
     @staticmethod
     def get_furthest_atom(residue):
         furthest_atom_names = ProteinStructure.furthest_atoms[residue.canonical_name]
         furthest_atom = ProteinStructure.__get_any_atom(furthest_atom_names, residue)
         return furthest_atom
+
+    def get_residues(self):
+        return self.protein_residues.values()
 
     @staticmethod
     def is_backbone_atom(atom):
@@ -68,7 +68,7 @@ class ProteinStructure():
     @staticmethod
     def __add_atom_surface(atom, sphere_points_amount, solvent_radius):
         sphere_radius = atom.radius + solvent_radius
-        sphere_points = ProteinStructure.__generate_sphere_points(sphere_points_amount) * sphere_radius + atom.coord
+        sphere_points = ProteinStructure.generate_sphere_points(sphere_points_amount) * sphere_radius + atom.coord
         atom.sas_points = []
 
         point_id = 0
@@ -179,7 +179,7 @@ class ProteinStructure():
     # http://blog.marmakoide.org/?p=1
     # noinspection PyTypeChecker
     @staticmethod
-    def __generate_sphere_points(n):
+    def generate_sphere_points(n):
         golden_angle = numpy.pi * (3 - numpy.sqrt(5))
         theta = golden_angle * numpy.arange(n)
         z = numpy.linspace(1, - 1, n)
@@ -216,6 +216,20 @@ class ProteinStructure():
             self.__add_unmodified_residue_name(residue)
             self.__cut_residue(residue)
             self.protein_residues[ProteinStructure.__residue_to_key(residue)] = residue
+
+    # it's faster than check if square distance less than square radius
+    @staticmethod
+    def __is_inside_sphere(test_point, sphere_center, sphere_radius):
+        dz = test_point[2] - sphere_center[2]
+        if -sphere_radius <= dz <= sphere_radius:
+            circle_radius = sphere_radius if dz == 0 else dz * math.tan(math.acos(dz / sphere_radius))
+            dy = test_point[1] - sphere_center[1]
+            if -circle_radius <= dy <= circle_radius:
+                x_width = circle_radius if dy == 0 else dy * math.tan(math.acos(dy / circle_radius))
+                dx = test_point[0] - sphere_center[0]
+                if -x_width <= dx <= x_width:
+                    return True
+        return False
 
     @staticmethod
     def __make_boxes(points, box_side):
@@ -269,20 +283,6 @@ class ProteinStructure():
     @staticmethod
     def __shift_index(shift, index):
         return tuple([shift + index for (shift, index) in zip(shift, index)])
-
-    # it's faster than check if square distance less than square radius
-    @staticmethod
-    def __is_inside_sphere(test_point, sphere_center, sphere_radius):
-        dz = test_point[2] - sphere_center[2]
-        if -sphere_radius <= dz <= sphere_radius:
-            circle_radius = sphere_radius if dz == 0 else dz * math.tan(math.acos(dz / sphere_radius))
-            dy = test_point[1] - sphere_center[1]
-            if -circle_radius <= dy <= circle_radius:
-                x_width = circle_radius if dy == 0 else dy * math.tan(math.acos(dy / circle_radius))
-                dx = test_point[0] - sphere_center[0]
-                if -x_width <= dx <= x_width:
-                    return True
-        return False
 
     beta_sheet_class_shift = 12
     no_secondary_structure_class = 14

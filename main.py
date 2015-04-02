@@ -4,40 +4,39 @@ import os.path as path
 import time
 import math
 
+import matplotlib.pyplot as pyplot
+
+
+# noinspection PyUnresolvedReferences
+from mpl_toolkits.mplot3d import Axes3D
 import scipy.spatial as spatial
 
 from Structure import ProteinStructure
 
 
-
-# calculates residue exposure relative to residue size
-def residue_exposure(residue):
-    total_points = 0
-    possible_points = 0
-    for atom in residue.atoms:
-        # don't count backbone atoms
-        if not ProteinStructure.is_backbone_atom(atom):
-            total_points += len(atom.sas_points)
-            possible_points += atom.max_sphere_points
-    return 0 if possible_points == 0 else total_points / possible_points
+# returns type, exposure and depth of residue
+def amino_acid_features(residue, surface_kdtree, structure):
+    res_depth = residue_depth(residue, surface_kdtree)
+    min_edge_dist = min_edge_distance(residue, structure)
+    return [residue.canonical_name, residue_exposure(residue), res_depth[0], residue.secondary_structure_class, min_edge_dist]
 
 
-def residue_depth(residue, surface_kdtree):
-    furthest_atom = ProteinStructure.get_furthest_atom(residue)
-    if furthest_atom is None:
-        return ['', '']
+def collect_features(residue, neighbours_amount, structure):
+    point_coords = [point.coord for point in structure.get_atom_points()]
+    plot_points(point_coords)
+    atom_coords = [atom.coord for atom in structure.get_atoms()]
 
-    nearest_surface_point_info = surface_kdtree.query(furthest_atom.coord)
-    return nearest_surface_point_info
+    surface_kdtree = spatial.KDTree(point_coords)
+    atom_kdtree = spatial.KDTree(atom_coords)
+
+    features = [structure.filename, residue.id[1], residue.status] + amino_acid_features(residue, surface_kdtree, structure) + \
+               neighbours_features(residue, neighbours_amount, atom_kdtree, surface_kdtree, structure)
+    str_features = [str(feature) for feature in features]
+    return str_features
 
 
-# returns distance theta and phi (spherical coordinates with center in base_atom) for atom
-def positional_features(base_atom, atom):
-    relative_atom_coord = atom.coord - base_atom.coord
-    distance = sum(map(lambda x: x ** 2, relative_atom_coord)) ** .5
-    theta = math.acos(relative_atom_coord[2] / distance)
-    phi = math.atan(relative_atom_coord[1] / relative_atom_coord[0])
-    return [distance, theta, phi]
+def get_surface_around(point, surface_kdtree, minimum_points):
+    surface_around = []
 
 
 def min_edge_distance(residue, structure):
@@ -52,13 +51,6 @@ def min_edge_distance(residue, structure):
             if distance < min_distance:
                 min_distance = distance
     return min_distance
-
-
-# returns type, exposure and depth of residue
-def amino_acid_features(residue, surface_kdtree, structure):
-    res_depth = residue_depth(residue, surface_kdtree)
-    min_edge_dist = min_edge_distance(residue, structure)
-    return [residue.canonical_name, residue_exposure(residue), res_depth[0], residue.secondary_structure_class, min_edge_dist]
 
 
 def neighbours_features(residue, neighbours_amount, atom_kdtree, surface_kdtree, structure):
@@ -89,31 +81,23 @@ def neighbours_features(residue, neighbours_amount, atom_kdtree, surface_kdtree,
     return features
 
 
-def collect_features(residue, neighbours_amount, structure):
-    point_coords = [point.coord for point in structure.get_atom_points()]
-    atom_coords = [atom.coord for atom in structure.get_atoms()]
-
-    surface_kdtree = spatial.KDTree(point_coords)
-    atom_kdtree = spatial.KDTree(atom_coords)
-
-    features = [structure.filename, residue.id[1], residue.status] + amino_acid_features(residue, surface_kdtree, structure) + \
-               neighbours_features(residue, neighbours_amount, atom_kdtree, surface_kdtree, structure)
-    str_features = [str(feature) for feature in features]
-    return str_features
+def plot_points(points):
+    figure = pyplot.figure()
+    axes = figure.add_subplot(111, projection = '3d')
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    zs = [point[2] for point in points]
+    axes.scatter(xs, ys, zs)
+    pyplot.show()
 
 
-def square_distance(point1, point2):
-    return sum([(coord1 - coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
-
-
-def test_residue_sas_points(residue, structure, solvent_radius):
-    for atom in residue.atoms:
-        for point in atom.sas_points:
-            for other_atom in structure.get_atoms():
-                if other_atom != atom:
-                    if square_distance(point.coord, other_atom.coord) < (other_atom.radius + solvent_radius) ** 2:
-                        return False
-    return True
+# returns distance theta and phi (spherical coordinates with center in base_atom) for atom
+def positional_features(base_atom, atom):
+    relative_atom_coord = atom.coord - base_atom.coord
+    distance = sum(map(lambda x: x ** 2, relative_atom_coord)) ** .5
+    theta = math.acos(relative_atom_coord[2] / distance)
+    phi = math.atan(relative_atom_coord[1] / relative_atom_coord[0])
+    return [distance, theta, phi]
 
 
 # only modifications with hetnam equal to parent directory name will be extracted
@@ -152,6 +136,41 @@ def process_directory(data_path, neighbours_amount):
             continue
         if files_proceeded % print_step == 0:
             print('{0} out of {1} files in {2} proceeded'.format(files_proceeded, pdb_entries, data_path))
+
+
+def residue_depth(residue, surface_kdtree):
+    furthest_atom = ProteinStructure.get_furthest_atom(residue)
+    if furthest_atom is None:
+        return ['', '']
+
+    nearest_surface_point_info = surface_kdtree.query(furthest_atom.coord)
+    return nearest_surface_point_info
+
+
+# calculates residue exposure relative to residue size
+def residue_exposure(residue):
+    total_points = 0
+    possible_points = 0
+    for atom in residue.atoms:
+        # don't count backbone atoms
+        if not ProteinStructure.is_backbone_atom(atom):
+            total_points += len(atom.sas_points)
+            possible_points += atom.max_sphere_points
+    return 0 if possible_points == 0 else total_points / possible_points
+
+
+def square_distance(point1, point2):
+    return sum([(coord1 - coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
+
+
+def test_residue_sas_points(residue, structure, solvent_radius):
+    for atom in residue.atoms:
+        for point in atom.sas_points:
+            for other_atom in structure.get_atoms():
+                if other_atom != atom:
+                    if square_distance(point.coord, other_atom.coord) < (other_atom.radius + solvent_radius) ** 2:
+                        return False
+    return True
 
 
 def main():
