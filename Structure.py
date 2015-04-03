@@ -2,12 +2,16 @@ from enum import Enum
 import itertools
 import math
 
+from scipy.spatial import KDTree
 from Bio import PDB
 import numpy
 
 
 class ProteinStructure():
-    def __init__(self, pdb_file = None):
+    # solvent radius = 1.2 + 0.96 where 1.2 is oh bond length in water molecule and 0.96 is van der waals radius for hydrogen
+    # https://ru.wikipedia.org/wiki/%D0%92%D0%BE%D0%B4%D0%B0#/media/File:Water_molecule_dimensions.svg
+    # https://en.wikipedia.org/wiki/Van_der_Waals_radius
+    def __init__(self, pdb_file = None, sphere_points_amount = 20, solvent_radius = 2.16):
         self.atom_points = []
         self.atoms = []
         self.edge_coords = []
@@ -16,14 +20,17 @@ class ProteinStructure():
         self.mod_name_to_mod_code = {}
         self.protein_residues = {}
         self.structure = None
-
+        self.surface_kdtree = None
+        self.atom_kdtree = None
+        self.sphere_points_amount = sphere_points_amount
+        self.solvent_radius = solvent_radius
         if pdb_file is not None:
             self.parse_structure(pdb_file)
 
-    def build_unmodified_sas(self, sphere_points_amount, solvent_radius):
+    def build_unmodified_sas(self):
         for atom in self.get_atoms():
-            ProteinStructure.__add_atom_surface(atom, sphere_points_amount, solvent_radius)
-        self.__remove_inner_points(solvent_radius)
+            self.__add_atom_surface(atom)
+        self.__remove_inner_points()
 
     def get_atom_points(self):
         if not self.atom_points:
@@ -65,17 +72,16 @@ class ProteinStructure():
             else:
                 print('{0} at {1} in {2}: atom radius is unknown'.format(atom, atom.parent.id[1], self.filename))
 
-    @staticmethod
-    def __add_atom_surface(atom, sphere_points_amount, solvent_radius):
-        sphere_radius = atom.radius + solvent_radius
-        sphere_points = ProteinStructure.generate_sphere_points(sphere_points_amount) * sphere_radius + atom.coord
+    def __add_atom_surface(self, atom):
+        sphere_radius = atom.radius + self.solvent_radius
+        sphere_points = ProteinStructure.generate_sphere_points(self.sphere_points_amount) * sphere_radius + atom.coord
         atom.sas_points = []
 
         point_id = 0
         for point in sphere_points:
             atom.sas_points.append(AtomPoint(list(point), atom, point_id))
             point_id += 1
-        atom.max_sphere_points = sphere_points_amount
+        atom.max_sphere_points = self.sphere_points_amount
 
     def __add_edge_coords(self):
         self.edge_coords = list(itertools.repeat([float('inf'), float('-inf')], 3))
@@ -199,6 +205,18 @@ class ProteinStructure():
                 return residue[atom_name]
         return None
 
+    def get_atom_kdtree(self):
+        if self.atom_kdtree is None:
+            points = [atom.coord for atom in self.get_atoms()]
+            self.atom_kdtree = KDTree(points)
+        return self.atom_kdtree
+
+    def get_surface_kdtree(self):
+        if self.surface_kdtree is None:
+            points = [point.coord for point in self.get_atom_points()]
+            self.surface_kdtree = KDTree(points)
+        return self.surface_kdtree
+
     def __init_protein_residues(self):
         for residue in self.structure.get_residues():
             # we don't need water
@@ -252,8 +270,8 @@ class ProteinStructure():
     def __make_residue_key(residue_chain, residue_number):
         return residue_chain + str(residue_number)
 
-    def __remove_inner_points(self, solvent_radius):
-        box_side = ProteinStructure.max_atom_radius + solvent_radius
+    def __remove_inner_points(self):
+        box_side = ProteinStructure.max_atom_radius + self.solvent_radius
         point_boxes = ProteinStructure.__make_boxes(self.get_atom_points(), box_side)
         atom_boxes = ProteinStructure.__make_boxes(self.get_atoms(), box_side)
 
@@ -263,7 +281,7 @@ class ProteinStructure():
                 for point in box_neighbour_points:
                     if point.deleted or point.parent == atom:
                         continue
-                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius + solvent_radius):
+                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius + self.solvent_radius):
                         point.deleted = True
 
         # now replace sas_points with sifted
