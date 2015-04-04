@@ -8,22 +8,20 @@ import numpy
 
 
 class ProteinStructure():
-    # solvent radius = 1.2 + 0.96 where 1.2 is oh bond length in water molecule and 0.96 is van der waals radius for hydrogen
-    # https://ru.wikipedia.org/wiki/%D0%92%D0%BE%D0%B4%D0%B0#/media/File:Water_molecule_dimensions.svg
-    # https://en.wikipedia.org/wiki/Van_der_Waals_radius
-    def __init__(self, pdb_file = None, sphere_points_amount = 20, solvent_radius = 2.16):
+    def __init__(self, pdb_file = None, sphere_points_amount = 30, solvent_radius = None):
         self.atom_points = []
         self.atoms = []
         self.edge_coords = []
         self.filename = ''
         self.mod_code_to_unmod_code = {}
         self.mod_name_to_mod_code = {}
-        self.protein_residues = {}
+        self.protein_residues = []
         self.structure = None
         self.surface_kdtree = None
         self.atom_kdtree = None
         self.sphere_points_amount = sphere_points_amount
-        self.solvent_radius = solvent_radius
+        if solvent_radius is None:
+            self.default_solvent_radius = ProteinStructure.default_solvent_radius
         if pdb_file is not None:
             self.parse_structure(pdb_file)
 
@@ -49,7 +47,8 @@ class ProteinStructure():
         return furthest_atom
 
     def get_residues(self):
-        return self.protein_residues.values()
+        # return self.protein_residues.values()
+        return self.protein_residues
 
     @staticmethod
     def is_backbone_atom(atom):
@@ -73,7 +72,7 @@ class ProteinStructure():
                 print('{0} at {1} in {2}: atom radius is unknown'.format(atom, atom.parent.id[1], self.filename))
 
     def __add_atom_surface(self, atom):
-        sphere_radius = atom.radius + self.solvent_radius
+        sphere_radius = atom.radius + self.default_solvent_radius
         sphere_points = ProteinStructure.generate_sphere_points(self.sphere_points_amount) * sphere_radius + atom.coord
         atom.sas_points = []
 
@@ -98,10 +97,18 @@ class ProteinStructure():
             residue.secondary_structure_class = self.no_secondary_structure_class
 
         # now let's change it for specified intervals
+        all_residues = self.get_residues()
+        key_pos_map = dict()
+        for i in range(len(all_residues)):
+            key_pos_map[self.__residue_to_key(all_residues[i])] = i
+
         for info in secondary_structure_info:
-            for i in range(info.interval_start, info.interval_end + 1):
-                self.protein_residues[ProteinStructure.__make_residue_key(info.chain_id, i)].secondary_structure_class = \
-                    info.secondary_structure_class
+            start_key = self.__make_residue_key(info.chain_id, info.interval_start, info.insertion_code_start)
+            end_key = self.__make_residue_key(info.chain_id, info.interval_end, info.insertion_code_end)
+            pos_start = key_pos_map[start_key]
+            pos_end = key_pos_map[end_key]
+            for i in range(pos_start, pos_end + 1):
+                all_residues[i].secondary_structure_class = info.secondary_structure_class
 
     def __add_structure_info(self, pdb_file):
         pdb_file.seek(0)
@@ -120,15 +127,21 @@ class ProteinStructure():
             elif header == 'HELIX':
                 chain_id = line[19]
                 interval_start = int(line[21:25].strip())
+                insertion_code_start = line[25]
                 interval_end = int(line[33:37].strip())
+                insertion_code_end = line[37]
                 helix_class = int(line[38:40].strip())
-                secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, interval_end, helix_class))
+                secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, insertion_code_start,
+                                                                       interval_end, insertion_code_end, helix_class))
             elif header == 'SHEET':
                 chain_id = line[21]
                 interval_start = int(line[22:26].strip())
+                insertion_code_start = line[26]
                 interval_end = int(line[33:37].strip())
+                insertion_code_end = line[37]
                 beta_sheet_class = int(line[38:40].strip()) + self.beta_sheet_class_shift
-                secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, interval_end, beta_sheet_class))
+                secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, insertion_code_start,
+                                                                       interval_end, insertion_code_end, beta_sheet_class))
 
         self.__init_protein_residues()
         self.__add_residue_secondary_structure(secondary_structure_info)
@@ -233,7 +246,8 @@ class ProteinStructure():
                 residue.status = ResidueStatus.unmodified
             self.__add_unmodified_residue_name(residue)
             self.__cut_residue(residue)
-            self.protein_residues[ProteinStructure.__residue_to_key(residue)] = residue
+            # self.protein_residues[ProteinStructure.__residue_to_key(residue)] = residue
+            self.protein_residues.append(residue)
 
     # it's faster than check if square distance less than square radius
     @staticmethod
@@ -267,11 +281,11 @@ class ProteinStructure():
                 target_dict[key] = [value]
 
     @staticmethod
-    def __make_residue_key(residue_chain, residue_number):
-        return residue_chain + str(residue_number)
+    def __make_residue_key(residue_chain, residue_number, insertion_code = ' '):
+        return residue_chain, residue_number, insertion_code
 
     def __remove_inner_points(self):
-        box_side = ProteinStructure.max_atom_radius + self.solvent_radius
+        box_side = ProteinStructure.max_atom_radius + self.default_solvent_radius
         point_boxes = ProteinStructure.__make_boxes(self.get_atom_points(), box_side)
         atom_boxes = ProteinStructure.__make_boxes(self.get_atoms(), box_side)
 
@@ -281,7 +295,7 @@ class ProteinStructure():
                 for point in box_neighbour_points:
                     if point.deleted or point.parent == atom:
                         continue
-                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius + self.solvent_radius):
+                    if ProteinStructure.__is_inside_sphere(point.coord, atom.coord, atom.radius + self.default_solvent_radius):
                         point.deleted = True
 
         # now replace sas_points with sifted
@@ -296,7 +310,7 @@ class ProteinStructure():
 
     @staticmethod
     def __residue_to_key(residue):
-        return residue.parent.id + str(residue.id[1])
+        return residue.parent.id, residue.id[1], residue.id[2]
 
     @staticmethod
     def __shift_index(shift, index):
@@ -304,6 +318,10 @@ class ProteinStructure():
 
     beta_sheet_class_shift = 12
     no_secondary_structure_class = 14
+    # solvent radius = 1.2 + 0.96 where 1.2 is oh bond length in water molecule and 0.96 is van der waals radius for hydrogen
+    # https://ru.wikipedia.org/wiki/%D0%92%D0%BE%D0%B4%D0%B0#/media/File:Water_molecule_dimensions.svg
+    # https://en.wikipedia.org/wiki/Van_der_Waals_radius
+    default_solvent_radius = 2.16
 
     standard_backbone_atoms = ['N', 'CA', 'C', ['O', 'S']]
     # variable names for the same atom (or atom replacement) listed in ()
@@ -357,8 +375,15 @@ class ResidueStatus(Enum):
 
 
 class SecondaryStructureInfo():
-    def __init__(self, chain_id, interval_start, interval_end, secondary_structure_class):
+    def __init__(self, chain_id, interval_start, insertion_code_start, interval_end, insertion_code_end,
+                 secondary_structure_class):
         self.chain_id = chain_id
         self.interval_start = interval_start
+        self.insertion_code_start = insertion_code_start
         self.interval_end = interval_end
+        self.insertion_code_end = insertion_code_end
         self.secondary_structure_class = secondary_structure_class
+
+    def __str__(self):
+        return 'Interval in {0} from {1}{2} to {3}{4}'.format(self.chain_id, self.interval_start, self.insertion_code_start,
+                                                              self.interval_end, self.insertion_code_end)

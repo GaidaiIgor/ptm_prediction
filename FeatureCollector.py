@@ -2,14 +2,20 @@ import os
 import os.path as path
 import math
 
+from matplotlib import pyplot
+from scipy.spatial import KDTree
+
 from Structure import ProteinStructure
 
 
 class FeatureCollector():
-    def __init__(self, neighbours_amount = 4, show_progress = True, print_step = 1):
+    def __init__(self, neighbours_amount = 4, show_progress = True, print_step = 1, query_radius = None, tree_depth = 5):
         self.neighbours_amount = neighbours_amount
         self.show_progress = show_progress
         self.print_step = print_step
+        if query_radius is None:
+            self.query_radius = max(ProteinStructure.standard_atom_radius.values()) + ProteinStructure.default_solvent_radius
+        self.tree_depth = tree_depth
         self.positional_general_headers = ['distance', 'theta', 'phi']
         self.amino_acid_general_headers = \
             ['type', 'solvent_exposure', 'residue_depth', 'secondary_structure', 'min_edge_distance']
@@ -57,16 +63,70 @@ class FeatureCollector():
     def get_secondary_structure_class(residue):
         return residue.secondary_structure_class
 
+    def get_surface_around(self, point_number, surface_kdtree):
+        initial_point = surface_kdtree.data[point_number]
+        is_used = [False] * len(surface_kdtree.data)
+        is_used[point_number] = True
+
+        current_layer = [initial_point]
+        next_layer = []
+        surface_around = [[initial_point]]
+        for i in range(self.tree_depth):
+            current_layer_kdtree = KDTree(current_layer)
+            all_points_neighbours = current_layer_kdtree.query_ball_tree(surface_kdtree, self.query_radius)
+            for point_neighbours in all_points_neighbours:
+                for neighbour_index in point_neighbours:
+                    if not is_used[neighbour_index]:
+                        is_used[neighbour_index] = True
+                        next_layer.append(list(surface_kdtree.data[neighbour_index]))
+            surface_around.append(next_layer)
+            current_layer = next_layer
+            next_layer = []
+        return surface_around
+
+    def split_coords(self, points):
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        zs = [point[2] for point in points]
+        return [xs, ys, zs]
+
+    def plot_points(self, points):
+        figure = pyplot.figure()
+        axes = figure.add_subplot(111, projection = '3d')
+        [xs, ys, zs] = self.split_coords(points)
+        axes.scatter(xs, ys, zs)
+        pyplot.show()
+
+    def test_get_near_surface_stats(self, surface):
+        # all_points = [point for layer in surface for point in layer]
+        # self.plot_points(all_points)
+        figure = pyplot.figure()
+        axes = figure.add_subplot(111, projection = '3d')
+        colors = ['r', 'g', 'b', 'k', 'y']
+        for i in range(len(colors)):
+            [xs, ys, zs] = self.split_coords(surface[i])
+            axes.scatter(xs, ys, zs, s = 40, c = colors[i], depthshade = False)
+        pyplot.show()
+
+    def get_near_surface_stats(self, residue, structure):
+        furthest_atom = ProteinStructure.get_furthest_atom(residue)
+        if furthest_atom is None:
+            return ['']
+        surface_kdtree = structure.get_surface_kdtree()
+        nearest_point_info = surface_kdtree.query(furthest_atom.coord)
+        surface = self.get_surface_around(nearest_point_info[1], surface_kdtree)
+        self.test_get_near_surface_stats(surface)
+        return surface
+
     # returns type, exposure, depth, secondary structure and edge distance of residue
-    @staticmethod
-    def amino_acid_features(residue, structure):
+    def amino_acid_features(self, residue, structure):
         residue_type = FeatureCollector.get_residue_type(residue)
         residue_exposure = FeatureCollector.residue_exposure(residue)
         res_depth = FeatureCollector.residue_depth(residue, structure.get_surface_kdtree())
         min_edge_dist = FeatureCollector.min_edge_distance(residue, structure)
         secondary_structure_class = FeatureCollector.get_secondary_structure_class(residue)
-        # surface_stats = get_near_surface_stats(residue, structure.get_surface_kdtree(), )
-        return [residue_type, residue_exposure, res_depth[0], secondary_structure_class, min_edge_dist]
+        # surface_stats = self.get_near_surface_stats(residue, structure)
+        return [residue_type, residue_exposure, res_depth[0], secondary_structure_class, min_edge_dist]  # + surface_stats
 
     # returns distance theta and phi (spherical coordinates with center in base_atom) for atom
     @staticmethod
@@ -95,7 +155,7 @@ class FeatureCollector():
                 continue
             used_residues.add(parent_residue.id[1])
             features += FeatureCollector.positional_features(furthest_atom, atom)
-            features += FeatureCollector.amino_acid_features(parent_residue, structure)
+            features += self.amino_acid_features(parent_residue, structure)
             if len(used_residues) - 1 >= self.neighbours_amount:
                 break
 
@@ -106,7 +166,7 @@ class FeatureCollector():
 
     def collect_features(self, residue, structure):
         features = [structure.filename, residue.id[1], residue.status] + \
-                   FeatureCollector.amino_acid_features(residue, structure) + \
+                   self.amino_acid_features(residue, structure) + \
                    self.neighbours_features(residue, structure)
         str_features = [str(feature) for feature in features]
         return str_features
@@ -130,6 +190,8 @@ class FeatureCollector():
                 unmodified_residue_code = structure.mod_code_to_unmod_code[modified_residue_code]
                 structure.build_unmodified_sas()
 
+                # self.get_near_surface_stats(structure.protein_residues['B556'], structure)
+
                 for residue in structure.get_residues():
                     if residue.canonical_name == unmodified_residue_code:
                         features = self.collect_features(residue, structure)
@@ -140,7 +202,7 @@ class FeatureCollector():
                 continue
             if files_proceeded % self.print_step == 0:
                 if self.show_progress:
-                    print('{0} out of {1} files in {2} proceeded'.format(files_proceeded, pdb_entries, data_path))
+                    print('{0} out of {1} files in {2} processed'.format(files_proceeded, pdb_entries, data_path))
 
     def export_features(self, output_file, directory_to_process):
         neighbours_headers = []
