@@ -5,20 +5,23 @@ import math
 from matplotlib import pyplot
 from scipy.spatial import KDTree
 
-from Structure import ProteinStructure
+from ProteinStructure import ProteinStructure
 
 
 class FeatureCollector():
-    def __init__(self, neighbours_amount = 4, show_progress = True, print_step = 1, query_radius = None, tree_depth = 5):
+    def __init__(self, neighbours_amount=4, show_progress=True, print_step=1, query_radius=None, tree_depth=6):
         self.neighbours_amount = neighbours_amount
         self.show_progress = show_progress
         self.print_step = print_step
-        if query_radius is None:
-            self.query_radius = max(ProteinStructure.standard_atom_radius.values()) + ProteinStructure.default_solvent_radius
         self.tree_depth = tree_depth
         self.positional_general_headers = ['distance', 'theta', 'phi']
         self.amino_acid_general_headers = \
             ['type', 'solvent_exposure', 'residue_depth', 'secondary_structure', 'min_edge_distance']
+
+        # if query_radius is None:
+        # self.query_radius = max(ProteinStructure.standard_atom_radius.values()) + ProteinStructure.default_solvent_radius
+        # else:
+        # self.query_radius = query_radius
 
     @staticmethod
     def residue_depth(residue, surface_kdtree):
@@ -64,7 +67,7 @@ class FeatureCollector():
         return residue.secondary_structure_class
 
     def get_surface_around(self, point_number, surface_kdtree):
-        initial_point = surface_kdtree.data[point_number]
+        initial_point = list(surface_kdtree.data[point_number])
         is_used = [False] * len(surface_kdtree.data)
         is_used[point_number] = True
 
@@ -72,6 +75,10 @@ class FeatureCollector():
         next_layer = []
         surface_around = [[initial_point]]
         for i in range(self.tree_depth):
+            if len(current_layer) == 0:
+                print('x')
+            if not (isinstance(current_layer, list) and isinstance(current_layer[0], list)):
+                print('che za huinya')
             current_layer_kdtree = KDTree(current_layer)
             all_points_neighbours = current_layer_kdtree.query_ball_tree(surface_kdtree, self.query_radius)
             for point_neighbours in all_points_neighbours:
@@ -102,8 +109,8 @@ class FeatureCollector():
         # self.plot_points(all_points)
         figure = pyplot.figure()
         axes = figure.add_subplot(111, projection = '3d')
-        colors = ['r', 'g', 'b', 'k', 'y']
-        for i in range(len(colors)):
+        colors = ['r', 'g', 'b', 'k', 'y', 'm', 'w', 'c']
+        for i in range(self.tree_depth):
             [xs, ys, zs] = self.split_coords(surface[i])
             axes.scatter(xs, ys, zs, s = 40, c = colors[i], depthshade = False)
         pyplot.show()
@@ -114,6 +121,8 @@ class FeatureCollector():
             return ['']
         surface_kdtree = structure.get_surface_kdtree()
         nearest_point_info = surface_kdtree.query(furthest_atom.coord)
+        if residue.id[1] == 16:
+            print('x')
         surface = self.get_surface_around(nearest_point_info[1], surface_kdtree)
         self.test_get_near_surface_stats(surface)
         return surface
@@ -125,8 +134,8 @@ class FeatureCollector():
         res_depth = FeatureCollector.residue_depth(residue, structure.get_surface_kdtree())
         min_edge_dist = FeatureCollector.min_edge_distance(residue, structure)
         secondary_structure_class = FeatureCollector.get_secondary_structure_class(residue)
-        # surface_stats = self.get_near_surface_stats(residue, structure)
-        return [residue_type, residue_exposure, res_depth[0], secondary_structure_class, min_edge_dist]  # + surface_stats
+        surface_stats = self.get_near_surface_stats(residue, structure)
+        return [residue_type, residue_exposure, res_depth[0], secondary_structure_class, min_edge_dist] + surface_stats
 
     # returns distance theta and phi (spherical coordinates with center in base_atom) for atom
     @staticmethod
@@ -188,9 +197,10 @@ class FeatureCollector():
                 modification_full_name = path.split(data_path)[1]
                 modified_residue_code = structure.mod_name_to_mod_code[modification_full_name]
                 unmodified_residue_code = structure.mod_code_to_unmod_code[modified_residue_code]
-                structure.build_unmodified_sas()
+                structure.build_ses()
 
-                # self.get_near_surface_stats(structure.protein_residues['B556'], structure)
+                # residue = structure.get_residue_by_key(ProteinStructure.make_residue_key('B', 556))
+                # self.get_near_surface_stats(residue, structure)
 
                 for residue in structure.get_residues():
                     if residue.canonical_name == unmodified_residue_code:
