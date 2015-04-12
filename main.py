@@ -29,6 +29,8 @@ def main():
 # check SNP: 3NBJ - 634 A
 # check multiple models
 start = time.clock()
+# a = [1, [2, 3], [1, [2, 3, [1, [2, 3]]]]]
+# print(list(FeatureCollector.flat_list(a)))
 # b(s = 3, d = 1)
 # c()
 main()

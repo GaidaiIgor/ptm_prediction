@@ -236,11 +236,11 @@ class ProteinStructure(object):
             self.atom_kdtree = KDTree(points)
         return self.atom_kdtree
 
-    # def get_surface_kdtree(self):
-    # if self.surface_kdtree is None:
-    # points = [point.coord for point in self.get_atom_points()]
-    # self.surface_kdtree = KDTree(points)
-    # return self.surface_kdtree
+    def get_surface_kdtree(self):
+        if self.surface_kdtree is None:
+            points = [point.coord for point in self.ses]
+            self.surface_kdtree = KDTree(points)
+        return self.surface_kdtree
 
     def __init_key_to_pos(self):
         all_residues = self.get_residues()
