@@ -6,13 +6,14 @@ from ProteinStructure import ProteinStructure
 
 
 class FeatureCollector():
-    def __init__(self, neighbours_amount = 4, show_progress = True, print_step = 1):
+    def __init__(self, neighbours_amount = 4, show_progress = True, print_step = 1, surface_radius_precision = .1):
         self.neighbours_amount = neighbours_amount
         self.show_progress = show_progress
         self.print_step = print_step
+        self.surface_radius_precision = surface_radius_precision
         self.positional_general_headers = ['distance', 'theta', 'phi']
         self.amino_acid_general_headers = ['type', 'residue_sas', 'residue_ses', 'residue_depth', 'secondary_structure',
-                                           'min_edge_distance', 'surface_stat']
+                                           'min_edge_distance', 'outer_sphere_distance', 'inner_sphere_distance']
 
     @staticmethod
     def residue_depth(residue, surface_kdtree):
@@ -55,31 +56,6 @@ class FeatureCollector():
     def get_secondary_structure_class(residue):
         return residue.secondary_structure_class
 
-    # def get_surface_around(self, point_number, surface_kdtree):
-    # initial_point = list(surface_kdtree.data[point_number])
-    #     is_used = [False] * len(surface_kdtree.data)
-    #     is_used[point_number] = True
-    #
-    #     current_layer = [initial_point]
-    #     next_layer = []
-    #     surface_around = [[initial_point]]
-    #     for i in range(self.tree_depth):
-    #         if len(current_layer) == 0:
-    #             print('x')
-    #         if not (isinstance(current_layer, list) and isinstance(current_layer[0], list)):
-    #             print('che za huinya')
-    #         current_layer_kdtree = KDTree(current_layer)
-    #         all_points_neighbours = current_layer_kdtree.query_ball_tree(surface_kdtree, self.query_radius)
-    #         for point_neighbours in all_points_neighbours:
-    #             for neighbour_index in point_neighbours:
-    #                 if not is_used[neighbour_index]:
-    #                     is_used[neighbour_index] = True
-    #                     next_layer.append(list(surface_kdtree.data[neighbour_index]))
-    #         surface_around.append(next_layer)
-    #         current_layer = next_layer
-    #         next_layer = []
-    #     return surface_around
-
     # def split_coords(self, points):
     # xs = [point[0] for point in points]
     #     ys = [point[1] for point in points]
@@ -92,29 +68,6 @@ class FeatureCollector():
     #     [xs, ys, zs] = self.split_coords(points)
     #     axes.scatter(xs, ys, zs)
     #     pyplot.show()
-
-    # def test_get_near_surface_stats(self, surface):
-    # # all_points = [point for layer in surface for point in layer]
-    #     # self.plot_points(all_points)
-    #     figure = pyplot.figure()
-    #     axes = figure.add_subplot(111, projection = '3d')
-    #     colors = ['r', 'g', 'b', 'k', 'y', 'm', 'w', 'c']
-    #     for i in range(self.tree_depth):
-    #         [xs, ys, zs] = self.split_coords(surface[i])
-    #         axes.scatter(xs, ys, zs, s = 40, c = colors[i], depthshade = False)
-    #     pyplot.show()
-
-    # def get_near_surface_stats(self, residue, structure):
-    # furthest_atom = ProteinStructure.get_furthest_atom(residue)
-    #     if furthest_atom is None:
-    #         return ['']
-    #     surface_kdtree = structure.get_surface_kdtree()
-    #     nearest_point_info = surface_kdtree.query(furthest_atom.coord)
-    #     if residue.id[1] == 16:
-    #         print('x')
-    #     surface = self.get_surface_around(nearest_point_info[1], surface_kdtree)
-    #     self.test_get_near_surface_stats(surface)
-    #     return surface
 
     # returns type, exposure, depth, secondary structure and edge distance of residue
 
@@ -130,13 +83,66 @@ class FeatureCollector():
     def flat_list(list_to_flat):
         return list(FeatureCollector.flat_list_generator(list_to_flat))
 
+    @staticmethod
+    def get_midpoint(point1, point2):
+        return [(coord1 + coord2) / 2 for (coord1, coord2) in zip(point1, point2)]
+
+    @staticmethod
+    def get_closes_point(base_point, kdtree):
+        closest_point_info = kdtree.query(base_point)
+        return list(kdtree.data[closest_point_info[1]])
+
+    @staticmethod
+    def square_distance(point1, point2):
+        return sum([(coord1 - coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
+
+    @staticmethod
+    def find_bounding_sphere_radius(interval_start, interval_end, surface_kdtree, eps):
+        base_point = interval_start
+        interval_distance = FeatureCollector.square_distance(interval_start, interval_end)
+        while interval_distance > eps:
+            midpoint = FeatureCollector.get_midpoint(interval_start, interval_end)
+            closest_point = FeatureCollector.get_closes_point(midpoint, surface_kdtree)
+            if closest_point == base_point:
+                interval_start = midpoint
+            else:
+                interval_end = midpoint
+            interval_distance = FeatureCollector.square_distance(interval_start, interval_end)
+
+        midpoint = FeatureCollector.get_midpoint(interval_start, interval_end)
+        return FeatureCollector.square_distance(midpoint, base_point) ** .5
+
+    @staticmethod
+    def protein_bounding_rect_max_side(structure):
+        return max([abs(sides[1] - sides[0]) for sides in structure.edge_coords])
+
+    def get_local_surface_stats(self, surface_kdtree, base_point, normal_vector, max_distance):
+        end_point = [component * max_distance for component in normal_vector]
+        external_radius = FeatureCollector.find_bounding_sphere_radius(base_point, end_point, surface_kdtree, self.surface_radius_precision)
+        reverse_end_point = [-coord for coord in end_point]
+        internal_radius = FeatureCollector.find_bounding_sphere_radius(base_point, reverse_end_point, surface_kdtree,
+                                                                       self.surface_radius_precision)
+        return external_radius, internal_radius
+
+    def get_residue_surface_stats(self, residue, structure):
+        furthest_atom = ProteinStructure.get_furthest_atom(residue)
+        if furthest_atom is None:
+            return ['', '']
+
+        surface_kdtree = structure.get_surface_kdtree()
+        surface = structure.get_surface()
+        closest_surface_point_info = surface_kdtree.query(furthest_atom.coord)
+        closest_surface_point = surface[closest_surface_point_info[1]]
+        max_side = FeatureCollector.protein_bounding_rect_max_side(structure)
+        return self.get_local_surface_stats(surface_kdtree, closest_surface_point.coord, closest_surface_point.normal_vector, max_side)
+
     def amino_acid_features(self, residue, structure):
         residue_type = FeatureCollector.get_residue_type(residue)
         residue_exposure = FeatureCollector.residue_exposure(residue)
         res_depth = FeatureCollector.residue_depth(residue, structure.get_surface_kdtree())[0]
         min_edge_dist = FeatureCollector.min_edge_distance(residue, structure)
         secondary_structure_class = FeatureCollector.get_secondary_structure_class(residue)
-        surface_stats = ''  # self.get_near_surface_stats(residue, structure)
+        surface_stats = self.get_residue_surface_stats(residue, structure)
 
         all_features = [residue_type, residue_exposure, res_depth, secondary_structure_class, min_edge_dist, surface_stats]
         return FeatureCollector.flat_list(all_features)

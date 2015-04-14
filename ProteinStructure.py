@@ -25,6 +25,9 @@ class ProteinStructure(object):
         if pdb_file is not None:
             self.parse_structure(pdb_file)
 
+    def get_surface(self):
+        return self.ses
+
     def get_atoms(self):
         if not self.atoms:
             self.atoms = [atom for residue in self.get_residues() for atom in residue.atoms]
@@ -236,9 +239,13 @@ class ProteinStructure(object):
             self.atom_kdtree = KDTree(points)
         return self.atom_kdtree
 
+    def get_surface_points(self):
+        return self.ses
+
     def get_surface_kdtree(self):
         if self.surface_kdtree is None:
-            points = [point.coord for point in self.ses]
+            surface_points = self.get_surface_points()
+            points = [point.coord for point in surface_points]
             self.surface_kdtree = KDTree(points)
         return self.surface_kdtree
 
