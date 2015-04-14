@@ -2,6 +2,8 @@ import os
 import os.path as path
 import math
 
+import Bio.PDB as PDB
+
 from ProteinStructure import ProteinStructure
 
 
@@ -13,7 +15,8 @@ class FeatureCollector():
         self.surface_radius_precision = surface_radius_precision
         self.positional_general_headers = ['distance', 'theta', 'phi']
         self.amino_acid_general_headers = ['type', 'residue_sas', 'residue_ses', 'residue_depth', 'secondary_structure',
-                                           'min_edge_distance', 'outer_sphere_distance', 'inner_sphere_distance']
+                                           'min_edge_distance', 'outer_sphere_distance', 'inner_sphere_distance', 'torsion_omega_previous',
+                                           'torsion_phi', 'torsion_psi', 'torsion_omega_next']
 
     @staticmethod
     def residue_depth(residue, surface_kdtree):
@@ -55,21 +58,6 @@ class FeatureCollector():
     @staticmethod
     def get_secondary_structure_class(residue):
         return residue.secondary_structure_class
-
-    # def split_coords(self, points):
-    # xs = [point[0] for point in points]
-    #     ys = [point[1] for point in points]
-    #     zs = [point[2] for point in points]
-    #     return [xs, ys, zs]
-
-    # def plot_points(self, points):
-    # figure = pyplot.figure()
-    #     axes = figure.add_subplot(111, projection = '3d')
-    #     [xs, ys, zs] = self.split_coords(points)
-    #     axes.scatter(xs, ys, zs)
-    #     pyplot.show()
-
-    # returns type, exposure, depth, secondary structure and edge distance of residue
 
     @staticmethod
     def flat_list_generator(object_to_flat):
@@ -136,6 +124,50 @@ class FeatureCollector():
         max_side = FeatureCollector.protein_bounding_rect_max_side(structure)
         return self.get_local_surface_stats(surface_kdtree, closest_surface_point.coord, closest_surface_point.normal_vector, max_side)
 
+    @staticmethod
+    def calculate_torsion_omega(current_residue, next_residue):
+        atom1 = current_residue['CA'].get_vector()
+        atom2 = current_residue['C'].get_vector()
+        atom3 = next_residue['N'].get_vector()
+        atom4 = next_residue['CA'].get_vector()
+        return PDB.calc_dihedral(atom1, atom2, atom3, atom4)
+
+    @staticmethod
+    def calculate_torsion_phi(previous_residue, current_residue):
+        atom1 = previous_residue['C'].get_vector()
+        atom2 = current_residue['N'].get_vector()
+        atom3 = current_residue['CA'].get_vector()
+        atom4 = current_residue['C'].get_vector()
+        return PDB.calc_dihedral(atom1, atom2, atom3, atom4)
+
+    @staticmethod
+    def calculate_torsion_psi(current_residue, next_residue):
+        atom1 = current_residue['N'].get_vector()
+        atom2 = current_residue['CA'].get_vector()
+        atom3 = current_residue['C'].get_vector()
+        atom4 = next_residue['N'].get_vector()
+        return PDB.calc_dihedral(atom1, atom2, atom3, atom4)
+
+    @staticmethod
+    def get_torsion_angles(residue, structure):
+        residues = structure.get_residues()
+        residue_index = structure.get_residue_index(residue)
+        previous_residue = None
+        next_residue = None
+        if residue_index != 0:
+            previous_residue = residues[residue_index - 1]
+        if residue_index != len(residues) - 1:
+            next_residue = residues[residue_index + 1]
+
+        angles = [''] * 4
+        if previous_residue is not None:
+            angles[0] = FeatureCollector.calculate_torsion_omega(previous_residue, residue)
+            angles[1] = FeatureCollector.calculate_torsion_phi(previous_residue, residue)
+        if next_residue is not None:
+            angles[2] = FeatureCollector.calculate_torsion_psi(residue, next_residue)
+            angles[3] = FeatureCollector.calculate_torsion_omega(residue, next_residue)
+        return angles
+
     def amino_acid_features(self, residue, structure):
         residue_type = FeatureCollector.get_residue_type(residue)
         residue_exposure = FeatureCollector.residue_exposure(residue)
@@ -143,8 +175,9 @@ class FeatureCollector():
         min_edge_dist = FeatureCollector.min_edge_distance(residue, structure)
         secondary_structure_class = FeatureCollector.get_secondary_structure_class(residue)
         surface_stats = self.get_residue_surface_stats(residue, structure)
+        torsion_angles = self.get_torsion_angles(residue, structure)
 
-        all_features = [residue_type, residue_exposure, res_depth, secondary_structure_class, min_edge_dist, surface_stats]
+        all_features = [residue_type, residue_exposure, res_depth, secondary_structure_class, min_edge_dist, surface_stats, torsion_angles]
         return FeatureCollector.flat_list(all_features)
 
     # returns distance theta and phi (spherical coordinates with center in base_atom) for atom
@@ -232,3 +265,18 @@ class FeatureCollector():
         output_file.write(','.join(['filename', 'pos', 'status'] + self.amino_acid_general_headers + neighbours_headers) + '\n')
         for entry in self.get_features_from_directory(directory_to_process):
             output_file.write(','.join(entry) + '\n')
+
+            # def split_coords(self, points):
+            # xs = [point[0] for point in points]
+            # ys = [point[1] for point in points]
+            # zs = [point[2] for point in points]
+            #     return [xs, ys, zs]
+
+            # def plot_points(self, points):
+            # figure = pyplot.figure()
+            #     axes = figure.add_subplot(111, projection = '3d')
+            #     [xs, ys, zs] = self.split_coords(points)
+            #     axes.scatter(xs, ys, zs)
+            #     pyplot.show()
+
+            # returns type, exposure, depth, secondary structure and edge distance of residue

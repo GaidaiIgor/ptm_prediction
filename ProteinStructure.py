@@ -7,7 +7,7 @@ from Bio import PDB
 
 
 class ProteinStructure(object):
-    def __init__(self, pdb_file=None, solvent_radius=1.5, surface_triangulation_density=1):
+    def __init__(self, pdb_file = None, solvent_radius = 1.5, surface_triangulation_density = 1):
         # self.atom_points = []
         self.atoms = []
         self.edge_coords = []
@@ -58,6 +58,9 @@ class ProteinStructure(object):
     def get_residue_by_key(self, key):
         return self.get_residues()[self.residues_key_to_pos[key]]
 
+    def get_residue_index(self, residue):
+        return self.residues_key_to_pos[ProteinStructure.residue_to_key(residue)]
+
     def parse_msms_vertices_file(self, vertices_file):
         atoms = self.get_atoms()
         for line in vertices_file:
@@ -86,7 +89,7 @@ class ProteinStructure(object):
             self.to_xyzr(xyzr_file)
         surface_path_prefix = 'surface'
         atom_area_path_prefix = 'atom_area'
-        msms_command = 'msms -no_header -probe_radius {} -density {} -noh -if {} -of {} -af {} > {}'. \
+        msms_command = 'msms -no_header -probe_radius {} -density {} -noh -if {} -of {} -af {} > {}'.\
             format(self.solvent_radius, self.surface_triangulation_density, xyzr_file.name, surface_path_prefix,
                    atom_area_path_prefix, os.devnull)
         os.system(msms_command)
@@ -252,7 +255,7 @@ class ProteinStructure(object):
     def __init_key_to_pos(self):
         all_residues = self.get_residues()
         for i in range(len(all_residues)):
-            self.residues_key_to_pos[ProteinStructure.__residue_to_key(all_residues[i])] = i
+            self.residues_key_to_pos[ProteinStructure.residue_to_key(all_residues[i])] = i
 
     def __init_protein_residues(self):
         for residue in self.structure.get_residues():
@@ -280,11 +283,11 @@ class ProteinStructure(object):
                 target_dict[key] = [value]
 
     @staticmethod
-    def make_residue_key(residue_chain, residue_number, insertion_code=' '):
+    def make_residue_key(residue_chain, residue_number, insertion_code = ' '):
         return residue_chain, residue_number, insertion_code
 
     @staticmethod
-    def __residue_to_key(residue):
+    def residue_to_key(residue):
         return residue.parent.id, residue.id[1], residue.id[2]
 
     beta_sheet_class_shift = 12
