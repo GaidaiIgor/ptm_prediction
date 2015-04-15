@@ -26,8 +26,8 @@ def main():
         feature_collector = FeatureCollector()
         feature_collector.export_features(output, data_path)
 
+
 # check SNP: 3NBJ - 634 A
-# check multiple models
 start = time.clock()
 # a = [1, [2, 3], [1, [2, 3, [1, [2, 3]]]]]
 # print(list(FeatureCollector.flat_list(a)))

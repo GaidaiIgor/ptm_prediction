@@ -6,6 +6,29 @@ from scipy.spatial import KDTree
 from Bio import PDB
 
 
+def init_static(protein_structure_class):
+    for atom_groups in protein_structure_class.standard_residue_atoms.values():
+        atom_groups.extend(protein_structure_class.standard_backbone_atoms)
+    protein_structure_class.max_residue_size = max(map(len, protein_structure_class.standard_residue_atoms.values()))
+    protein_structure_class.standard_residue_atoms =\
+        protein_structure_class.map_dict_values(protein_structure_class.standard_residue_atoms, make_list_of_lists)
+    protein_structure_class.furthest_atoms =\
+        protein_structure_class.map_dict_values(protein_structure_class.furthest_atoms, to_list)
+    return protein_structure_class
+
+
+def make_list_of_lists(target_list: list):
+    return [to_list(item) for item in target_list]
+
+
+def to_list(item):
+    if isinstance(item, list):
+        return item
+    else:
+        return [item]
+
+
+@init_static
 class ProteinStructure(object):
     def __init__(self, pdb_file = None, solvent_radius = 1.5, surface_triangulation_density = 1):
         # self.atom_points = []
@@ -180,7 +203,11 @@ class ProteinStructure(object):
                 insertion_code_start = line[26]
                 interval_end = int(line[33:37].strip())
                 insertion_code_end = line[37]
-                beta_sheet_class = int(line[38:40].strip()) + self.beta_sheet_class_shift
+                try:
+                    beta_sheet_class = int(line[38:40].strip()) + self.beta_sheet_class_shift
+                except ValueError:
+                    beta_sheet_class = ''
+
                 secondary_structure_info.append(SecondaryStructureInfo(chain_id, interval_start, insertion_code_start,
                                                                        interval_end, insertion_code_end, beta_sheet_class))
 
@@ -258,7 +285,7 @@ class ProteinStructure(object):
             self.residues_key_to_pos[ProteinStructure.residue_to_key(all_residues[i])] = i
 
     def __init_protein_residues(self):
-        for residue in self.structure.get_residues():
+        for residue in self.structure[0].get_residues():
             # we don't need water
             if residue.id[0] == 'W':
                 continue
@@ -277,10 +304,8 @@ class ProteinStructure(object):
         self.__init_key_to_pos()
 
     @staticmethod
-    def __make_list_of_lists(target_dict: dict):
-        for key, value in target_dict.items():
-            if not isinstance(value, list):
-                target_dict[key] = [value]
+    def map_dict_values(target_dict: dict, function):
+        return dict(zip(target_dict, map(function, target_dict.values())))
 
     @staticmethod
     def make_residue_key(residue_chain, residue_number, insertion_code = ' '):
@@ -292,10 +317,6 @@ class ProteinStructure(object):
 
     beta_sheet_class_shift = 12
     no_secondary_structure_class = 14
-    # solvent radius = 1.2 + 0.96 where 1.2 is oh bond length in water molecule and 0.96 is van der waals radius for hydrogen
-    # https://ru.wikipedia.org/wiki/%D0%92%D0%BE%D0%B4%D0%B0#/media/File:Water_molecule_dimensions.svg
-    # https://en.wikipedia.org/wiki/Van_der_Waals_radius
-    # default_solvent_radius = 2.16
 
     standard_backbone_atoms = ['N', 'CA', 'C', ['O', 'S']]
     # variable names for the same atom (or atom replacement) listed in ()
@@ -309,10 +330,6 @@ class ProteinStructure(object):
                               'GLU': ['CB', 'CG', 'CD', 'OE1', 'OE2'], 'LYS': ['CB', 'CG', 'CD', 'CE', 'NZ'],
                               'ARG': ['CB', 'CG', 'CD', 'NE', 'CZ', 'NH1', 'NH2'],
                               'HIS': ['CB', 'CG', 'ND1', 'CD2', 'CE1', 'NE2']}
-    max_residue_size = max(map(len, standard_residue_atoms.values()))
-
-    for atom_groups in standard_residue_atoms.values():
-        atom_groups.extend(standard_backbone_atoms)
 
     furthest_atoms = {'GLY': 'CA', 'ALA': 'CB', 'VAL': ['CG1', 'CG2'], 'LEU': ['CD1', 'CD2'], 'ILE': 'CD1', 'MET': 'CE',
                       'PHE': 'CZ', 'TRP': 'CH2', 'PRO': 'CG', 'SER': 'OG', 'THR': ['OG1', 'CG2'], 'CYS': 'SG', 'TYR': 'OH',
@@ -322,11 +339,6 @@ class ProteinStructure(object):
     # https://en.wikipedia.org/wiki/Van_der_Waals_radius
     standard_atom_radius = {'C': 1.7, 'O': 1.52, 'N': 1.55, 'S': 1.8, 'SE': 1.9}
     max_atom_radius = max(standard_atom_radius.values())
-
-    # noinspection PyUnresolvedReferences
-    __make_list_of_lists.__func__(standard_residue_atoms)
-    # noinspection PyUnresolvedReferences
-    __make_list_of_lists.__func__(furthest_atoms)
 
 
 class SurfacePoint():

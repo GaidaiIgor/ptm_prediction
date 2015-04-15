@@ -191,7 +191,7 @@ class FeatureCollector():
 
     def neighbours_features(self, residue, structure):
         features = []
-        query_size = self.neighbours_amount * ProteinStructure.max_residue_size
+        query_size = (self.neighbours_amount + 1) * ProteinStructure.max_residue_size
         furthest_atom = ProteinStructure.get_furthest_atom(residue)
         atoms = structure.get_atoms()
         if furthest_atom is None:
@@ -212,7 +212,7 @@ class FeatureCollector():
             if len(used_residues) - 1 >= self.neighbours_amount:
                 break
 
-        assert len(used_residues) - 1 == self.neighbours_amount, 'Found less residues than required'
+        assert len(used_residues) - 1 == self.neighbours_amount, "Found less residues than required in " + structure.filename
         return features
 
     def collect_features(self, residue, structure):
@@ -249,12 +249,12 @@ class FeatureCollector():
                         features = self.collect_features(residue, structure)
                         yield features
                 files_proceeded += 1
+                if files_proceeded % self.print_step == 0:
+                    if self.show_progress:
+                        print('{0} out of {1} files in {2} processed'.format(files_proceeded, pdb_entries, data_path))
             # skip non-directory and non-pdb files
             else:
                 continue
-            if files_proceeded % self.print_step == 0:
-                if self.show_progress:
-                    print('{0} out of {1} files in {2} processed'.format(files_proceeded, pdb_entries, data_path))
 
     def export_features(self, output_file, directory_to_process):
         neighbours_headers = []
