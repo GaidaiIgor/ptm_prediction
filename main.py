@@ -1,5 +1,6 @@
 import sys
 import time
+import os.path as path
 
 # noinspection PyUnresolvedReferences
 from mpl_toolkits.mplot3d import Axes3D
@@ -22,7 +23,8 @@ def test_residue_sas_points(residue, structure, solvent_radius):
 
 def main():
     data_path = sys.argv[1]
-    with open('output1.csv', 'w') as output:
+    output_path = path.join(data_path, 'output.csv')
+    with open(output_path, 'w') as output:
         feature_collector = FeatureCollector()
         feature_collector.export_features(output, data_path)
 

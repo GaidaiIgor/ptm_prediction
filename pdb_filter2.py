@@ -4,6 +4,7 @@ import os.path as path
 import shutil
 
 
+# returns all modification names of residue_name for pdb_file
 def modification_names(pdb_file, residue_name):
     modres_names = set()
     directories = set()
@@ -25,15 +26,16 @@ def modification_names(pdb_file, residue_name):
 
 
 def main():
-    print_step = 100
+    print_step = 1
     data_path = sys.argv[1]
-    residue_name = sys.argv[2]
+    if len(sys.argv) < 3:
+        residue_name = path.split(data_path)[1]
+    else:
+        residue_name = sys.argv[2]
     filenames = os.listdir(data_path)
+    pdb_entries = len([filename for filename in filenames if filename.endswith('.pdb')])
 
-    # filenames = filenames[:1]
-    # filenames = ['132L.pdb']
-
-    files_proceeded = 0
+    files_processed = 0
     for filename in filenames:
         next_file_path = path.join(data_path, filename)
         with open(next_file_path) as next_file:
@@ -43,9 +45,9 @@ def main():
             if not path.exists(full_destination_path):
                 os.mkdir(full_destination_path)
             shutil.copy(next_file_path, full_destination_path)
-        files_proceeded += 1
-        if files_proceeded % print_step == 0:
-            print('%d files out of %d files proceeded' % (files_proceeded, len(filenames)))
+        files_processed += 1
+        if files_processed % print_step == 0:
+            print('{0} out of {1} files in {2} processed'.format(files_processed, pdb_entries, data_path))
 
 
 main()

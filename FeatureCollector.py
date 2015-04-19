@@ -16,7 +16,7 @@ class FeatureCollector():
         self.positional_general_headers = ['distance', 'theta', 'phi']
         self.amino_acid_general_headers = ['type', 'residue_sas', 'residue_ses', 'residue_depth', 'secondary_structure',
                                            'min_edge_distance', 'outer_sphere_distance', 'inner_sphere_distance', 'torsion_omega_previous',
-                                           'torsion_phi', 'torsion_psi', 'torsion_omega_next']
+                                           'torsion_phi', 'torsion_psi', 'torsion_omega_next', 'chain_size', 'relative_pos']
 
     @staticmethod
     def residue_depth(residue, surface_kdtree):
@@ -168,6 +168,14 @@ class FeatureCollector():
             angles[3] = FeatureCollector.calculate_torsion_omega(residue, next_residue)
         return angles
 
+    @staticmethod
+    def get_chain_size(residue):
+        return len(residue.parent.child_list)
+
+    @staticmethod
+    def get_relative_pos(residue):
+        return residue.id[1] / FeatureCollector.get_chain_size(residue)
+
     def amino_acid_features(self, residue, structure):
         residue_type = FeatureCollector.get_residue_type(residue)
         residue_exposure = FeatureCollector.residue_exposure(residue)
@@ -176,8 +184,11 @@ class FeatureCollector():
         secondary_structure_class = FeatureCollector.get_secondary_structure_class(residue)
         surface_stats = self.get_residue_surface_stats(residue, structure)
         torsion_angles = self.get_torsion_angles(residue, structure)
+        chain_size = FeatureCollector.get_chain_size(residue)
+        relative_pos = FeatureCollector.get_relative_pos(residue)
 
-        all_features = [residue_type, residue_exposure, res_depth, secondary_structure_class, min_edge_dist, surface_stats, torsion_angles]
+        all_features = [residue_type, residue_exposure, res_depth, secondary_structure_class, min_edge_dist, surface_stats, torsion_angles,
+                        chain_size, relative_pos]
         return FeatureCollector.flat_list(all_features)
 
     # returns distance theta and phi (spherical coordinates with center in base_atom) for atom
@@ -227,7 +238,7 @@ class FeatureCollector():
         filenames = os.listdir(data_path)
         pdb_entries = len([filename for filename in filenames if filename.endswith('.pdb')])
 
-        files_proceeded = 0
+        files_processed = 0
         for filename in filenames:
             next_file_path = path.join(data_path, filename)
             if path.isdir(next_file_path):
@@ -248,10 +259,10 @@ class FeatureCollector():
                     if residue.canonical_name == unmodified_residue_code:
                         features = self.collect_features(residue, structure)
                         yield features
-                files_proceeded += 1
-                if files_proceeded % self.print_step == 0:
+                files_processed += 1
+                if files_processed % self.print_step == 0:
                     if self.show_progress:
-                        print('{0} out of {1} files in {2} processed'.format(files_proceeded, pdb_entries, data_path))
+                        print('{0} out of {1} files in {2} processed'.format(files_processed, pdb_entries, data_path))
             # skip non-directory and non-pdb files
             else:
                 continue
