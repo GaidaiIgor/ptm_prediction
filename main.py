@@ -3,38 +3,25 @@ import time
 import os.path as path
 
 # noinspection PyUnresolvedReferences
-from mpl_toolkits.mplot3d import Axes3D
+# from mpl_toolkits.mplot3d import Axes3D
 from FeatureCollector import FeatureCollector
 
 
-def square_distance(point1, point2):
-    return sum([(coord1 - coord2) ** 2 for (coord1, coord2) in zip(point1, point2)])
-
-
-def test_residue_sas_points(residue, structure, solvent_radius):
-    for atom in residue.atoms:
-        for point in atom.sas_points:
-            for other_atom in structure.get_atoms():
-                if other_atom != atom:
-                    if square_distance(point.coord, other_atom.coord) < (other_atom.radius + solvent_radius) ** 2:
-                        return False
-    return True
-
-
 def main():
+    neighbours_amount = 6
+    solvent_radius = 1.5
     data_path = sys.argv[1]
-    output_path = path.join(data_path, 'output.csv')
-    with open(output_path, 'w') as output:
-        feature_collector = FeatureCollector()
-        feature_collector.export_features(output, data_path)
+    output_file_path = sys.argv[2]
+    modification_full_name = sys.argv[3]
+    with open(output_file_path, "w") as output:
+        feature_collector = FeatureCollector(neighbours_amount=neighbours_amount,
+                                             protein_structure_args={"solvent_radius": solvent_radius})
+        feature_collector.export_features(output, data_path, modification_full_name)
+    # with open(path.join(output_path, "met_primary6.csv"), "w") as output:
+    #     feature_collector = FeatureCollector(neighbours_amount=neighbours_amount, use_tertiary=False)
+    #     feature_collector.export_features(output, data_path)
 
 
-# check SNP: 3NBJ - 634 A
 start = time.clock()
-# a = [1, [2, 3], [1, [2, 3, [1, [2, 3]]]]]
-# print(list(FeatureCollector.flat_list(a)))
-# b(s = 3, d = 1)
-# c()
 main()
-# cProfile.run('main()', '1')
 print('{0}s elapsed'.format(time.clock() - start))

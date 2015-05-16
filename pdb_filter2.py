@@ -32,11 +32,11 @@ def main():
         residue_name = path.split(data_path)[1]
     else:
         residue_name = sys.argv[2]
-    filenames = os.listdir(data_path)
-    pdb_entries = len([filename for filename in filenames if filename.endswith('.pdb')])
+    file_names = os.listdir(data_path)
+    pdb_entries = len([filename for filename in file_names if filename.endswith('.pdb')])
 
     files_processed = 0
-    for filename in filenames:
+    for filename in file_names:
         next_file_path = path.join(data_path, filename)
         with open(next_file_path) as next_file:
             directories = modification_names(next_file, residue_name)

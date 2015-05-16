@@ -18,14 +18,14 @@ def get_unmodified_residue_codes(pdb_file):
 def process_directory(data_path):
     print_step = 10
 
-    pdb_parser = PDB.PDBParser(PERMISSIVE = False, QUIET = True)
-    filenames = os.listdir(data_path)
+    pdb_parser = PDB.PDBParser(PERMISSIVE=False, QUIET=True)
+    file_names = os.listdir(data_path)
 
     # filenames = filenames[:1]
     # filenames = ['1E93.pdb']
 
     files_proceeded = 0
-    for filename in filenames:
+    for filename in file_names:
         next_file_path = path.join(data_path, filename)
         # if path.isdir(next_file_path):
         # files_proceeded += process_directory(next_file_path)
@@ -78,7 +78,7 @@ def process_directory(data_path):
 
             files_proceeded += 1
         if files_proceeded % print_step == 0:
-            print('{0} out of {1} files in {2} proceeded'.format(files_proceeded, len(filenames), data_path))
+            print('{0} out of {1} files in {2} proceeded'.format(files_proceeded, len(file_names), data_path))
     return files_proceeded
 
 

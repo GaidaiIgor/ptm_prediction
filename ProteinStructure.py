@@ -1,6 +1,7 @@
 from enum import Enum
 import itertools
 import os
+from os import path
 
 from scipy.spatial import KDTree
 from Bio import PDB
@@ -30,7 +31,7 @@ def to_list(item):
 
 @init_static
 class ProteinStructure(object):
-    def __init__(self, pdb_file = None, solvent_radius = 1.5, surface_triangulation_density = 1):
+    def __init__(self, pdb_file=None, solvent_radius=1.5, surface_triangulation_density=1):
         # self.atom_points = []
         self.atoms = []
         self.edge_coords = []
@@ -73,13 +74,16 @@ class ProteinStructure(object):
         return False
 
     def parse_structure(self, pdb_file):
-        pdb_parser = PDB.PDBParser(PERMISSIVE = False, QUIET = True)
+        pdb_parser = PDB.PDBParser(PERMISSIVE=False, QUIET=True)
         self.filename = pdb_file.name
         self.structure = pdb_parser.get_structure(pdb_file.name, pdb_file)
         self.__add_structure_info(pdb_file)
 
     def get_residue_by_key(self, key):
-        return self.get_residues()[self.residues_key_to_pos[key]]
+        residue_index = self.residues_key_to_pos.get(key)
+        if residue_index is None:
+            return None
+        return self.get_residues()[residue_index]
 
     def get_residue_index(self, residue):
         return self.residues_key_to_pos[ProteinStructure.residue_to_key(residue)]
@@ -120,6 +124,8 @@ class ProteinStructure(object):
         surface_vertices_file_path = msms_produced_files[0]
         atom_area_file_path = msms_produced_files[2]
 
+        if not path.exists(surface_vertices_file_path):
+            return False
         with open(surface_vertices_file_path) as surface_vertices_file:
             self.parse_msms_vertices_file(surface_vertices_file)
         with open(atom_area_file_path) as atom_area_file:
@@ -128,9 +134,10 @@ class ProteinStructure(object):
         os.remove(xyzr_file.name)
         for file_path in msms_produced_files:
             os.remove(file_path)
+        return True
 
     def build_ses(self):
-        self.run_msms()
+        return self.run_msms()
 
     @staticmethod
     def atom_to_xyzr(atom):
@@ -169,6 +176,9 @@ class ProteinStructure(object):
         for info in secondary_structure_info:
             start_key = ProteinStructure.make_residue_key(info.chain_id, info.interval_start, info.insertion_code_start)
             end_key = ProteinStructure.make_residue_key(info.chain_id, info.interval_end, info.insertion_code_end)
+            # some inconsistency in pdb
+            if start_key not in self.residues_key_to_pos or end_key not in self.residues_key_to_pos:
+                continue
             pos_start = self.residues_key_to_pos[start_key]
             pos_end = self.residues_key_to_pos[end_key]
             for i in range(pos_start, pos_end + 1):
@@ -247,6 +257,7 @@ class ProteinStructure(object):
                     continue
                 residue.atoms.append(atom)
                 # check if atom is in standard residue atoms
+
                 for possible_atom_names in ProteinStructure.standard_residue_atoms[residue.canonical_name]:
                     if atom.id in possible_atom_names:
                         break
@@ -299,6 +310,9 @@ class ProteinStructure(object):
             else:
                 residue.status = ResidueStatus.unmodified
             self.__add_unmodified_residue_name(residue)
+            # skip non-standard amino acids
+            if residue.canonical_name not in self.standard_residue_atoms:
+                continue
             self.__cut_residue(residue)
             self.protein_residues.append(residue)
         self.__init_key_to_pos()
@@ -308,12 +322,19 @@ class ProteinStructure(object):
         return dict(zip(target_dict, map(function, target_dict.values())))
 
     @staticmethod
-    def make_residue_key(residue_chain, residue_number, insertion_code = ' '):
+    def make_residue_key(residue_chain, residue_number, insertion_code=' '):
         return residue_chain, residue_number, insertion_code
 
     @staticmethod
     def residue_to_key(residue):
         return residue.parent.id, residue.id[1], residue.id[2]
+
+    @staticmethod
+    def atoms_are_in_residue(atom_names, residue):
+        for atom_name in atom_names:
+            if atom_name not in residue:
+                return False
+        return True
 
     beta_sheet_class_shift = 12
     no_secondary_structure_class = 14
