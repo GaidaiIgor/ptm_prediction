@@ -362,7 +362,7 @@ class ProteinStructure(object):
     max_atom_radius = max(standard_atom_radius.values())
 
 
-class SurfacePoint():
+class SurfacePoint:
     def __init__(self, coord, normal_vector, closest_atom):
         self.coord = coord
         self.normal_vector = normal_vector
@@ -380,7 +380,7 @@ class ResidueStatus(Enum):
             return 'unmodified'
 
 
-class SecondaryStructureInfo():
+class SecondaryStructureInfo:
     def __init__(self, chain_id, interval_start, insertion_code_start, interval_end, insertion_code_end,
                  secondary_structure_class):
         self.chain_id = chain_id

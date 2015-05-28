@@ -7,7 +7,7 @@ import Bio.PDB as PDB
 from ProteinStructure import ProteinStructure
 
 
-class FeatureCollector():
+class FeatureCollector:
     def __init__(self, neighbours_amount=4, show_progress=True, print_step=1, surface_radius_precision=.1,
                  use_tertiary=True, protein_structure_args={}):
 
@@ -276,7 +276,7 @@ class FeatureCollector():
         return str_features
 
     # only modifications with hetnam equal to parent directory name will be extracted
-    def get_features_from_directory(self, data_path, modification_full_name):
+    def get_features_from_directory(self, data_path, modification_full_name_initial):
         file_names = os.listdir(data_path)
         pdb_entries = len([filename for filename in file_names if filename.endswith('.pdb')])
 
@@ -284,10 +284,15 @@ class FeatureCollector():
         for filename in file_names:
             next_file_path = path.join(data_path, filename)
             if path.islink(next_file_path):
-                yield from self.get_features_from_directory(os.readlink(next_file_path), modification_full_name)
+                yield from self.get_features_from_directory(os.readlink(next_file_path), modification_full_name_initial)
             elif next_file_path.endswith('.pdb'):
                 with open(next_file_path) as next_file:
                     structure = ProteinStructure(next_file, **self.protein_structure_args)
+
+                if modification_full_name_initial == "auto":
+                    modification_full_name = path.split(data_path)[1]
+                else:
+                    modification_full_name = modification_full_name_initial
 
                 modified_residue_code = structure.mod_name_to_mod_code[modification_full_name]
                 unmodified_residue_code = structure.mod_code_to_unmod_code[modified_residue_code]
@@ -298,6 +303,7 @@ class FeatureCollector():
 
                 for residue in structure.get_residues():
                     if residue.canonical_name == unmodified_residue_code:
+                        residue.status = "modified" if residue.resname == modified_residue_code else "unmodified"
                         if self.use_tertiary:
                             features = self.collect_features(residue, structure)
                         else:

@@ -1,6 +1,5 @@
 import sys
 import time
-import os.path as path
 
 # noinspection PyUnresolvedReferences
 # from mpl_toolkits.mplot3d import Axes3D
