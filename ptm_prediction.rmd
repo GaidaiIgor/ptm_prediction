@@ -1,0 +1,73 @@
+```{r sources, echo=FALSE}
+library(knitr)
+read_chunk("ptm_prediction.r")
+read_chunk("functions.r")
+```
+```{r functions, echo=FALSE, results='hide', message=FALSE}
+```
+```{r filename, echo=FALSE}
+```
+Загружаем данные:
+```{r data_load, cache=TRUE, cache.extra=file.info(filename)$mtime}
+```
+Подготовим test-train:
+```{r data_preparation, cache=TRUE, dependson="data_load"}
+```
+`r nrow(data)` наблюдения из всего `r length(levels(data[, 1]))` различных файлов для `r ncol(data)` предикторов.
+`r nrow(train)` наблюдений в train. `r nrow(test)` наблюдений в test.
+rpart:
+```{r rpart_tune, cache=TRUE, dependson="data_load"}
+set.seed(seed)
+tn.rp = new_tune(rpart, expand_formula(formula, data), data = data, dependence_class = data[, 1], predict.func = function(...) predict(...)[, 1], tunecontrol = tune.control(error.fun = error_fun_auc), ranges = list(cp = 1:5 / 100, minsplit = c(1:5)))
+```
+```{r rpart, cache=TRUE, dependson="rpart_tune"}
+tn.rp
+plot(tn.rp, color.palette = rainbow)
+best.rp = tn.rp$best.model
+rpart.plot(best.rp)
+rt = rpart(expand_formula(formula, train), train, cp = best.rp$cp, minsplit = best.rp$minsplit)
+plot_roc(predict(rt, test)[, 1], test$status, status_ordering)
+```
+RandomForest:
+```{r random_forest_tune, cache=TRUE, dependson="data_load"}
+set.seed(seed)
+tn.rf = new_tune(randomForest, formula, data = data, dependence_class = data[, 1], ntree = 200, importance = TRUE, predict.func = function(...) predict(..., type = "prob")[, 1], tunecontrol = tune.control(error.fun = error_fun_auc), ranges = list(mtry = 1:7, nodesize = 15:22))
+```
+```{r random_forest, cache=TRUE, dependson="random_forest_tune"}
+tn.rf
+plot(tn.rf, color.palette = rainbow)
+best.rf = tn.rf$best.model
+best.rf$nodesize = tn.rf$best.parameters[, 2]
+plot(best.rf)
+varImpPlot(best.rf)
+imp = importance(best.rf, type = 2)
+imp[order(-imp), ]
+rf = randomForest(formula, train, ntree = best.rf$ntree, importance = TRUE, mtry = best.rf$mtry, nodesize = best.rf$nodesize)
+plot_roc(predict(rf, test, type = "prob")[, 1], test$status, status_ordering)
+
+```
+GBM:
+```{r gbm_tune, cache=TRUE, dependson="data_load", results='hide'}
+set.seed(seed)
+tn.gb = new_tune(gbm_wrap, formula, data = data, dependence_class = data[, 1], dependence_gbm = data[, 1], distribution = "multinomial", n.trees = 400, shrinkage = 0.01, cv.folds = 4, predict.func = function(...) predict(...)[, 1, 1], tunecontrol = tune.control(cross = 4, error.fun = error_fun_auc), ranges = list(interaction.depth = 1:4, n.minobsinnode = c(40, 30, 20)))
+```
+```{r gbm, cache=TRUE, dependson="gbm_tune"}
+tn.gb
+plot(tn.gb, color.palette = rainbow)
+best.gbm = tn.gb$best.model
+summary(best.gbm)
+gb = new_gbm(formula, "multinomial", train, dependence_gbm = train[, 1], n.trees = best.gbm$n.trees, interaction.depth = best.gbm$interaction.depth, n.minobsinnode = best.gbm$n.minobsinnode, shrinkage = best.gbm$shrinkage, cv.folds = best.gbm$cv.folds)
+plot_roc(predict(gb, test)[, 1, 1], test$status, status_ordering)
+```
+SVM:
+```{r svm_tune, cache=TRUE, dependson="data_load"}
+set.seed(seed)
+tn.svm = new_tune(svm, expand_formula(formula, data), data = data, dependence_class = data[, 1], probability = TRUE, predict.func = function(...) attr(predict(..., probability = TRUE), "probabilities")[, 1], tunecontrol = tune.control(error.fun = error_fun_auc), ranges = list(gamma = 2^(-9:-3), cost = 2^(-7:-3)))
+```
+```{r svm, cache=TRUE, dependson="svm_tune"}
+tn.svm
+plot(tn.svm, color.palette = rainbow, transform.x = log, transform.y = log)
+best.svm = tn.svm$best.model
+sv = svm(expand_formula(formula, data), train, probability = TRUE, gamma = best.svm$gamma, cost = best.svm$cost)
+plot_roc(attr(predict(sv, test, probability = TRUE), "probabilities")[, 1], test$status, status_ordering)
+```
